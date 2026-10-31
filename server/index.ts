@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { resolve } from 'node:path';
 import express from 'express';
@@ -6,12 +5,20 @@ import { openDatabase, migrate } from './db.js';
 import { createApplication } from './app.js';
 import { attachMatchmaking } from './matchmaking.js';
 import { configureAppOrigin } from './config.js';
+import { loadEnvironment } from './env.js';
 
-if (existsSync('.env')) process.loadEnvFile('.env');
+loadEnvironment();
 const port = Number(process.env.PORT || 3000);
 configureAppOrigin(process.env);
 const db = await openDatabase();
-await migrate(db);
+const migrationDb = process.env.DATABASE_URL_UNPOOLED
+  ? await openDatabase({ migrations: true })
+  : db;
+try {
+  await migrate(migrationDb);
+} finally {
+  if (migrationDb !== db) await migrationDb.close();
+}
 const app = createApplication(db);
 const server = createServer(app);
 const stopMatchmaking = attachMatchmaking(server, db);

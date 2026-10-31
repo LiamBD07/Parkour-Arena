@@ -9,10 +9,13 @@ export interface Database {
   close(): Promise<void>;
   kind: 'postgres' | 'embedded';
 }
-export async function openDatabase(): Promise<Database> {
-  if (process.env.DATABASE_URL) {
+export async function openDatabase(options: { migrations?: boolean } = {}): Promise<Database> {
+  const connectionString = options.migrations
+    ? process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL
+    : process.env.DATABASE_URL;
+  if (connectionString) {
     const pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString,
       max: 5,
       connectionTimeoutMillis: 10000,
       idleTimeoutMillis: 30000,

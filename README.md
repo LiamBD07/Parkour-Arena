@@ -13,7 +13,7 @@ npm run dev
 
 The development server listens on port **3000**. No accounts with an external provider or secrets are needed for local development. Without `DATABASE_URL`, the server creates an embedded PostgreSQL database using PGlite in `.data/postgres/`. Accounts and progress survive restarts. This directory is ignored by Git. Embedded mode is refused in production so a deployment cannot silently lose account data.
 
-Optional settings live in `.env`; copy `.env.example` and set only the values you need. Never commit `.env` or credentials. The app loads `.env` itself; shell exports also work. Keep the inherited TLS trust and proxy settings in managed environments.
+Optional settings live in `.env`; copy `.env.example` and set only the values you need. Never commit `.env` or credentials. The app loads `.env.local` (the Neon CLI default) followed by `.env`; existing process environment values take precedence over both files. Keep the inherited TLS trust and proxy settings in managed environments.
 
 ```sh
 npm test          # Movement, accounts, purchases, replay validation, Stripe and matchmaking
@@ -76,6 +76,25 @@ Run **one Render instance** for this version: the lobby registry lives in proces
 Render builds with `npm ci --include=dev && npm run build` and starts with `npm start`. Production requires a usable `DATABASE_URL` and an HTTPS origin supplied by Render or an explicit `APP_ORIGIN` override. One host and one origin mean there is no separate frontend CORS configuration. Cookies are HttpOnly, SameSite=Lax and Secure in production. Passwords are salted with scrypt; raw session tokens are stored only in cookies, and their hashes are stored in the database. Authentication and API requests are rate limited. Writes reject foreign browser origins. Enable provider backups and use an appropriate Neon database role for your release.
 
 This repository includes deployment configuration, **not a provisioned Render service or Neon project**. The local database is for development and is not automatically uploaded to Neon.
+
+## Neon CLI setup
+
+The repository includes `neon.ts` for a PostgreSQL-only backend. Postgres is included in every Neon branch; the app keeps its existing accounts, sessions and `pg` driver on the long-running Render Node server.
+
+```sh
+npm i -g neon@latest
+neon login
+neon init -y --org-id <organization-id> --project-id <project-id> --branch production --services postgres
+neon deploy
+npm run build
+npm run dev
+```
+
+The project link is stored locally in the ignored `.neon` file. `neon deploy` must successfully authenticate and reach the Neon API before it can reconcile services and pull database credentials. Review the plan against an existing project before accepting changes, especially any existing Neon Auth configuration. The generated `auth: false` declaration corresponds to this app's PostgreSQL-only setup.
+
+The CLI writes `.env.local` by default, or updates `.env` if it exists. The server and migration command load both, with runtime settings taking precedence, followed by `.env.local`, then `.env`. App traffic uses pooled `DATABASE_URL`. When `DATABASE_URL_UNPOOLED` is supplied, schema migrations use that direct connection, including during server startup; the pool remains for normal queries. Both files and `.neon` are ignored by Git. Keep them private.
+
+After deployment, verify `/api/health` reports `database: "postgres"`, register and sign in, purchase/equip a cosmetic, and save a solo run and its ghost. A health response of `database: "embedded"` only verifies local development. Cloud deployments and live Neon integration are not verified by a successful local build or the offline project link alone.
 
 ## Optional real-money credit purchases
 
