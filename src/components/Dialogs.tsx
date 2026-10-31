@@ -12,7 +12,8 @@ import {
   ShieldCheck,
   ArrowUpRight,
 } from 'lucide-react';
-import { api, type PlayerResponse, type Settings } from '../api';
+import { api, ApiError, type PlayerResponse, type Settings } from '../api';
+import { getManagedAuthClient } from '../auth-client';
 import type { Player } from '../../shared/game';
 import { Modal, Credits } from './Primitives';
 
@@ -25,13 +26,44 @@ export function AuthDialog({
 }) {
   const [register, setRegister] = useState(true),
     [busy, setBusy] = useState(false),
-    [error, setError] = useState('');
+    [error, setError] = useState(''),
+    [linkLegacy, setLinkLegacy] = useState(false);
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true);
     setError('');
     const form = new FormData(e.currentTarget);
     try {
+      if (linkLegacy) {
+        const { player } = await api<PlayerResponse>('/auth/link-legacy', {
+          password: form.get('legacyPassword'),
+        });
+        onSuccess(player);
+        onClose();
+        return;
+      }
+      const client = await getManagedAuthClient();
+      if (client) {
+        const email = String(form.get('email')).trim();
+        const password = String(form.get('password'));
+        const result = register
+          ? await client.signUp.email({ email, password, name: String(form.get('username')) })
+          : await client.signIn.email({ email, password });
+        if (result.error)
+          throw new Error(result.error.message || 'Neon could not complete sign-in.');
+        const session = await client.getSession();
+        if (session.error || !session.data?.user)
+          throw new Error(
+            register
+              ? 'Account created. Complete any required email verification, then sign in.'
+              : 'A session could not be restored. Please sign in again.',
+          );
+        const { player } = await api<{ player: Player | null }>('/me');
+        if (!player) throw new Error('Your session could not be authorized. Please sign in again.');
+        onSuccess(player);
+        onClose();
+        return;
+      }
       const { player } = await api<PlayerResponse>(`/auth/${register ? 'register' : 'login'}`, {
         email: form.get('email'),
         password: form.get('password'),
@@ -40,6 +72,7 @@ export function AuthDialog({
       onSuccess(player);
       onClose();
     } catch (e) {
+      if (e instanceof ApiError && e.code === 'LINK_LEGACY_ACCOUNT') setLinkLegacy(true);
       setError((e as Error).message);
     } finally {
       setBusy(false);
@@ -56,72 +89,94 @@ export function AuthDialog({
           ? 'A runner name. A new line. A place on the board.'
           : 'Your gear, your ghosts, your next personal best.'}
       </p>
-      <div className="segmented">
-        <button
-          className={register ? 'active' : ''}
-          onClick={() => {
-            setRegister(true);
-            setError('');
-          }}
-        >
-          Create account
-        </button>
-        <button
-          className={!register ? 'active' : ''}
-          onClick={() => {
-            setRegister(false);
-            setError('');
-          }}
-        >
-          Sign in
-        </button>
-      </div>
+      {!linkLegacy && (
+        <div className="segmented">
+          <button
+            className={register ? 'active' : ''}
+            onClick={() => {
+              setRegister(true);
+              setError('');
+            }}
+          >
+            Create account
+          </button>
+          <button
+            className={!register ? 'active' : ''}
+            onClick={() => {
+              setRegister(false);
+              setError('');
+            }}
+          >
+            Sign in
+          </button>
+        </div>
+      )}
       <form onSubmit={submit} className="auth-form">
-        {register && (
+        {linkLegacy && (
           <label>
-            <span>Runner name</span>
+            <span>Previous Parkour Arena password</span>
             <div className="input-wrap">
-              <UserRound size={17} />
+              <LockKeyhole size={17} />
               <input
-                name="username"
+                name="legacyPassword"
+                type="password"
                 required
-                minLength={3}
-                maxLength={18}
-                pattern="[a-zA-Z0-9_]+"
-                autoComplete="username"
-                placeholder="Your name on the leaderboard"
+                maxLength={128}
+                autoComplete="current-password"
+                placeholder="Link your existing runner and keep your gear"
               />
             </div>
           </label>
         )}
-        <label>
-          <span>Email address</span>
-          <div className="input-wrap">
-            <Mail size={17} />
-            <input
-              name="email"
-              type="email"
-              required
-              autoComplete="email"
-              placeholder="you@example.com"
-            />
-          </div>
-        </label>
-        <label>
-          <span>Password</span>
-          <div className="input-wrap">
-            <LockKeyhole size={17} />
-            <input
-              name="password"
-              type="password"
-              required
-              minLength={10}
-              maxLength={128}
-              autoComplete={register ? 'new-password' : 'current-password'}
-              placeholder="At least 10 characters"
-            />
-          </div>
-        </label>
+        {!linkLegacy && (
+          <>
+            {register && (
+              <label>
+                <span>Runner name</span>
+                <div className="input-wrap">
+                  <UserRound size={17} />
+                  <input
+                    name="username"
+                    required
+                    minLength={3}
+                    maxLength={18}
+                    pattern="[a-zA-Z0-9_]+"
+                    autoComplete="username"
+                    placeholder="Your name on the leaderboard"
+                  />
+                </div>
+              </label>
+            )}
+            <label>
+              <span>Email address</span>
+              <div className="input-wrap">
+                <Mail size={17} />
+                <input
+                  name="email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                />
+              </div>
+            </label>
+            <label>
+              <span>Password</span>
+              <div className="input-wrap">
+                <LockKeyhole size={17} />
+                <input
+                  name="password"
+                  type="password"
+                  required
+                  minLength={10}
+                  maxLength={128}
+                  autoComplete={register ? 'new-password' : 'current-password'}
+                  placeholder="At least 10 characters"
+                />
+              </div>
+            </label>
+          </>
+        )}
         {error && (
           <div className="error-message" role="alert">
             {error}
@@ -132,7 +187,7 @@ export function AuthDialog({
             <LoaderCircle className="spin" size={18} />
           ) : (
             <>
-              {register ? 'CREATE YOUR RUNNER' : 'SIGN IN'}
+              {linkLegacy ? 'LINK EXISTING RUNNER' : register ? 'CREATE YOUR RUNNER' : 'SIGN IN'}
               <ArrowRight size={18} />
             </>
           )}

@@ -5,6 +5,7 @@ import type { Database } from './db.js';
 import { sessionPlayer } from './auth.js';
 import { getPlayer } from './app.js';
 import { z } from 'zod';
+import { managedAuthEnabled, managedPlayer } from './neon-auth.js';
 
 interface Member {
   id: string;
@@ -33,6 +34,7 @@ const joinSchema = z.object({
   map: z.enum(['skyline', 'foundry', 'harbor']),
   classId: z.enum(['runner', 'traceur', 'acrobat']),
   region: z.string().max(60),
+  token: z.string().max(12000).optional(),
 });
 const stateSchema = z.object({
   type: z.literal('state'),
@@ -138,7 +140,8 @@ export function attachMatchmaking(server: Server, db: Database) {
       messages = 0;
     }, 1000);
     ws.on('close', () => clearInterval(budget));
-    ws.on('message', (data) => {
+    let joining = false;
+    ws.on('message', async (data) => {
       if (++messages > 40) {
         ws.close(1008, 'Message rate exceeded');
         return;
@@ -146,7 +149,16 @@ export function attachMatchmaking(server: Server, db: Database) {
       try {
         const raw = JSON.parse(data.toString());
         if (raw.type === 'join' && !client.room) {
+          if (joining || client.queuedAt) return;
+          joining = true;
           const join = joinSchema.parse(raw);
+          if (managedAuthEnabled() && join.token) {
+            const p = await getPlayer(db, await managedPlayer(db, join.token));
+            client.name = p.username;
+            client.skin = p.equipped;
+            client.mmr = p.mmr;
+          }
+          if (ws.readyState !== WebSocket.OPEN) return;
           client.map = join.map;
           client.region = join.region;
           client.classId = join.classId;
@@ -166,6 +178,8 @@ export function attachMatchmaking(server: Server, db: Database) {
         }
       } catch {
         send(ws, { type: 'error', error: 'Invalid arena message.' });
+      } finally {
+        joining = false;
       }
     });
   });

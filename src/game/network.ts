@@ -35,6 +35,7 @@ export class ArenaNetwork {
     classId: string,
     private stun: string,
     private callbacks: Callbacks,
+    private token?: string,
   ) {
     this.socket = new WebSocket(
       `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/arena`,
@@ -49,6 +50,7 @@ export class ArenaNetwork {
             map,
             classId,
             region: Intl.DateTimeFormat().resolvedOptions().timeZone.split('/')[0] || 'unknown',
+            token: this.token,
           });
         }
         if (msg.type === 'queued') callbacks.onQueue(msg.waiting, msg.wait);

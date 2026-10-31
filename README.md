@@ -70,31 +70,55 @@ Run **one Render instance** for this version: the lobby registry lives in proces
 1. Put this code on the `main` branch of `LiamBD07/Parkour-Arena` in GitHub. No credentials belong in the repository.
 2. Create a PostgreSQL project at [Neon](https://console.neon.tech/), ideally in the same region as Render. From Connect, copy the **pooled connection string** for the application database and role. Keep `sslmode=require` (and any provider-supplied channel binding setting). The driver keeps certificate validation enabled.
 3. In [Render](https://dashboard.render.com/), create a **Blueprint** from that GitHub repository. The included [`render.yaml`](render.yaml) defines a single Node web service in Frankfurt, a frozen-lockfile build and the health check.
-4. When Render asks for `DATABASE_URL`, paste the pooled connection string from Neon's Connect panel. The app automatically uses Render's assigned HTTPS URL (`RENDER_EXTERNAL_URL`) for origin checks and checkout return URLs. You do not need to guess or enter the service hostname. If you later use a custom domain, set `APP_ORIGIN` explicitly to that HTTPS origin, without a trailing slash.
+4. When Render asks for `DATABASE_URL`, paste the pooled connection string from Neon's Connect panel. Supply `NEON_AUTH_BASE_URL` and `NEON_AUTH_JWKS_URL` from the successful Neon deployment as well. The app automatically uses Render's assigned HTTPS URL (`RENDER_EXTERNAL_URL`) for origin checks and checkout return URLs. You do not need to guess or enter the service hostname. If you later use a custom domain, set `APP_ORIGIN` explicitly to that HTTPS origin, without a trailing slash.
 5. Deploy. Startup connects to PostgreSQL and runs migrations. Verify `/api/health`, register a runner, refresh to confirm session persistence, finish a solo run, and check its leaderboard ghost. A stopped or unreachable Neon database makes the health check fail instead of showing false readiness.
 
-Render builds with `npm ci --include=dev && npm run build` and starts with `npm start`. Production requires a usable `DATABASE_URL` and an HTTPS origin supplied by Render or an explicit `APP_ORIGIN` override. One host and one origin mean there is no separate frontend CORS configuration. Cookies are HttpOnly, SameSite=Lax and Secure in production. Passwords are salted with scrypt; raw session tokens are stored only in cookies, and their hashes are stored in the database. Authentication and API requests are rate limited. Writes reject foreign browser origins. Enable provider backups and use an appropriate Neon database role for your release.
+Render builds with `npm ci --include=dev && npm run build` and starts with `npm start`. Production requires a usable `DATABASE_URL` and an HTTPS origin supplied by Render or an explicit `APP_ORIGIN` override. One host and one origin mean there is no separate frontend CORS configuration. Cookies are HttpOnly, SameSite=Lax and Secure in production. When managed Auth is configured, the browser uses the Neon Auth SDK for email/password signup, sign-in, session restoration and sign-out. The API verifies signed Neon JWTs before reading or changing player data. Without managed Auth configuration, local development retains the previous scrypt and hashed-session implementation. Authentication and API requests are rate limited. Writes reject foreign browser origins. Enable provider backups and use an appropriate Neon database role for your release.
 
 This repository includes deployment configuration, **not a provisioned Render service or Neon project**. The local database is for development and is not automatically uploaded to Neon.
 
 ## Neon CLI setup
 
-The repository includes `neon.ts` for a PostgreSQL-only backend. Postgres is included in every Neon branch; the app keeps its existing accounts, sessions and `pg` driver on the long-running Render Node server.
+The repository includes `neon.ts` declaring Postgres and managed Better Auth (`auth: true`). The long-running Render server retains its `pg` pool and application-owned player, inventory and leaderboard tables. Neon owns the managed identity and session tables.
 
 ```sh
 npm i -g neon@latest
 neon login
-neon init -y --org-id <organization-id> --project-id <project-id> --branch production --services postgres
+neon init -y --org-id <organization-id> --project-id <project-id> --branch production --services postgres,auth
 neon deploy
 npm run build
 npm run dev
 ```
 
-The project link is stored locally in the ignored `.neon` file. `neon deploy` must successfully authenticate and reach the Neon API before it can reconcile services and pull database credentials. Review the plan against an existing project before accepting changes, especially any existing Neon Auth configuration. The generated `auth: false` declaration corresponds to this app's PostgreSQL-only setup.
+The project link is stored locally in the ignored `.neon` file. `neon deploy` must successfully authenticate and reach the Neon API before it can reconcile services and pull database credentials. Review the plan against an existing project before accepting changes, especially any existing Neon Auth configuration. This app explicitly declares `auth: true`. No Data API or additional Neon services are required.
 
 The CLI writes `.env.local` by default, or updates `.env` if it exists. The server and migration command load both, with runtime settings taking precedence, followed by `.env.local`, then `.env`. App traffic uses pooled `DATABASE_URL`. When `DATABASE_URL_UNPOOLED` is supplied, schema migrations use that direct connection, including during server startup; the pool remains for normal queries. Both files and `.neon` are ignored by Git. Keep them private.
 
 After deployment, verify `/api/health` reports `database: "postgres"`, register and sign in, purchase/equip a cosmetic, and save a solo run and its ghost. A health response of `database: "embedded"` only verifies local development. Cloud deployments and live Neon integration are not verified by a successful local build or the offline project link alone.
+
+## Managed email signup and live verification
+
+After `neon deploy` succeeds, `.env.local` (or `.env`) contains `NEON_AUTH_BASE_URL` and `NEON_AUTH_JWKS_URL`. The server loads both at runtime. It exposes only the public Auth base URL through `/api/config`, so no `VITE_*` alias or embedded Auth secret is needed. The React dialog calls `@neon/auth`'s `signUp.email`, `signIn.email` and `getSession`; sign-out uses the SDK. API requests carry the SDK's short-lived JWT, verified against the deployed branch's JWKS and issuer. The current SDK's type export omits the `.token()` helper, so token retrieval uses the SDK's typed `$fetch('/token')` method for the same JWT plugin endpoint. The same token is sent in a WebSocket join message, never in its URL.
+
+With `NEON_AUTH_BASE_URL` set, legacy password endpoints and legacy session-cookie access are disabled. The first verified Neon identity creates one player profile with starter credits. Matching an existing email never automatically takes over its player: the UI asks for the old Parkour Arena password, then links the existing player ID, inventory, run history and credits. Existing records are retained. Password hashes cannot be moved into managed Auth; an existing player creates a Neon login first and proves the old account password to link it.
+
+Set the two Auth URLs on Render and register its exact HTTPS origin on the selected branch:
+
+```sh
+neon neon-auth domain add https://your-service.onrender.com
+```
+
+Localhost is normally pre-approved; inspect `neon neon-auth domain allow-localhost get` if it is rejected. Match the branch's email-verification setting. If verification is required, complete it before expecting a signed-in session. Shared SMTP supports verification codes; production email delivery needs Neon's SMTP configuration. No app-owned Better Auth server or Better Auth schema migrations are installed.
+
+A real-provider smoke test is explicit and separate from local tests:
+
+```sh
+NEON_TEST_EMAIL=your-fresh-test-inbox@example.com npm run check:neon-auth
+```
+
+Use a fresh email address you control. The test generates a password in memory (or uses a securely configured `NEON_TEST_PASSWORD`), calls the actual HTTPS Neon Auth SDK, and reads the current user through a new SDK client with the received cookies. It then signs out and signs back in and checks session restoration. It creates a real user in the linked provider and leaves that test record there. It never prints passwords, cookies, tokens or full provider errors. If verification blocks session creation, the test reports failure instead of claiming success. Missing Auth configuration exits with status 2 and `LIVE NEON AUTH NOT RUN`.
+
+`npm test` uses isolated local databases and locally signed JWT fixtures for authorization, signature rejection and account-linking checks. Those tests do **not** prove that managed Auth was deployed or a real Neon user was created. Complete the real-provider test and a browser reload/protected-action check before claiming live signup works. Cookies on a separate Auth origin also depend on browser cookie policy; verify on the target browser and hosting domain.
 
 ## Optional real-money credit purchases
 
@@ -104,7 +128,7 @@ Credit purchases remain visibly disabled until Stripe is configured. You can ear
 2. Add `STRIPE_SECRET_KEY`, `STRIPE_PRICE_1000`, `STRIPE_PRICE_2800` and `STRIPE_PRICE_6500` to Render's secure environment settings. Use **test-mode** keys and prices first.
 3. Add a Stripe webhook pointing to `https://<your-service>/api/payments/webhook`. Subscribe to `checkout.session.completed` and `checkout.session.async_payment_succeeded`. Set its signing secret as `STRIPE_WEBHOOK_SECRET` in Render and redeploy.
 4. Complete a test checkout. Confirm credits are delivered by the verified webhook. Replaying an event must not grant credits again. The browser success redirect never grants currency.
-5. Before enabling live payments, establish your prices, refund/support process, terms, privacy notice, account recovery/email verification and applicable selling requirements. This MVP has no email delivery, password-reset or refund/revocation UI. Stripe receipts and payment management remain in Stripe.
+5. Before enabling live payments, establish your prices, refund/support process, terms, privacy notice, account recovery/email verification and applicable selling requirements. Managed Auth supports email delivery when configured on Neon; this MVP has no password-reset or refund/revocation UI. Stripe receipts and payment management remain in Stripe.
 
 The server chooses pack IDs, configured prices and player IDs; it never accepts a cash price or credit quantity from the client. A unique checkout ID makes fulfillment idempotent across different event IDs and retries. Live payment processing requires your actual Stripe account and has not been exercised by automated tests.
 

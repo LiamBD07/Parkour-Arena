@@ -71,6 +71,8 @@ export async function migrate(db: Database) {
       mmr INTEGER NOT NULL DEFAULT 1000, equipped TEXT NOT NULL DEFAULT 'standard', trail TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`);
+    await q('ALTER TABLE players ADD COLUMN IF NOT EXISTS neon_user_id TEXT');
+    await q('CREATE UNIQUE INDEX IF NOT EXISTS players_neon_user_idx ON players(neon_user_id)');
     await q(`CREATE TABLE IF NOT EXISTS sessions (
       token_hash TEXT PRIMARY KEY, player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
       expires_at TIMESTAMPTZ NOT NULL

@@ -14,6 +14,7 @@ import {
   type Course,
 } from '../shared/game.js';
 import type { Database } from './db.js';
+import { ManagedAuthError, managedAuthEnabled, managedIdentity } from './neon-auth.js';
 import {
   hashPassword,
   checkPassword,
@@ -144,7 +145,13 @@ export function createApplication(db: Database, options: { limits?: boolean } = 
                 scriptSrc: ["'self'"],
                 styleSrc: ["'self'", "'unsafe-inline'"],
                 imgSrc: ["'self'", 'data:', 'blob:'],
-                connectSrc: ["'self'", 'wss:'],
+                connectSrc: [
+                  "'self'",
+                  'wss:',
+                  ...(process.env.NEON_AUTH_BASE_URL
+                    ? [new URL(process.env.NEON_AUTH_BASE_URL).origin]
+                    : []),
+                ],
                 workerSrc: ["'self'", 'blob:'],
                 fontSrc: ["'self'"],
               },
@@ -250,6 +257,7 @@ export function createApplication(db: Database, options: { limits?: boolean } = 
       payments: paymentsEnabled(),
       multiplayer: true,
       stun: process.env.STUN_URL || 'stun:stun.l.google.com:19302',
+      neonAuthUrl: process.env.NEON_AUTH_BASE_URL || null,
     }),
   );
   app.get('/api/me', async (req, res) => {
@@ -257,6 +265,7 @@ export function createApplication(db: Database, options: { limits?: boolean } = 
     res.json({ player: id ? await getPlayer(db, id) : null });
   });
   app.post('/api/auth/register', async (req, res) => {
+    if (managedAuthEnabled()) throw new HttpError(409, 'Use Neon managed signup in the app.');
     const input = credentials
       .extend({
         username: z
@@ -288,6 +297,7 @@ export function createApplication(db: Database, options: { limits?: boolean } = 
     res.status(201).json({ player: await getPlayer(db, id) });
   });
   app.post('/api/auth/login', async (req, res) => {
+    if (managedAuthEnabled()) throw new HttpError(409, 'Use Neon managed sign-in in the app.');
     const input = credentials.parse(req.body);
     const result = await db.query<{ id: string; password_hash: string }>(
       'SELECT id,password_hash FROM players WHERE email=$1',
@@ -301,8 +311,37 @@ export function createApplication(db: Database, options: { limits?: boolean } = 
     res.json({ player: await getPlayer(db, result.rows[0].id) });
   });
   app.post('/api/auth/logout', async (req, res) => {
+    if (managedAuthEnabled())
+      throw new HttpError(409, 'Sign out using the Neon Auth SDK in the app.');
     await deleteSession(db, req, res);
     res.json({ ok: true });
+  });
+  app.post('/api/auth/link-legacy', async (req, res) => {
+    if (!managedAuthEnabled()) throw new HttpError(400, 'Managed Auth is not enabled.');
+    const { password } = z.object({ password: z.string().min(1).max(128) }).parse(req.body);
+    const bearer = req.headers.authorization;
+    if (!bearer?.startsWith('Bearer ')) throw new HttpError(401, 'Sign into Neon first.');
+    const identity = await managedIdentity(bearer.slice(7));
+    const old = await db.query<{ id: string; password_hash: string; neon_user_id: string | null }>(
+      'SELECT id,password_hash,neon_user_id FROM players WHERE email=$1',
+      [identity.email],
+    );
+    const account = old.rows[0];
+    if (!account || account.neon_user_id || !(await checkPassword(password, account.password_hash)))
+      throw new HttpError(
+        401,
+        'The previous Parkour Arena password is incorrect or this runner is already linked.',
+      );
+    await db.transaction(async (q) => {
+      const changed = await q(
+        "UPDATE players SET neon_user_id=$1,password_hash='managed-neon' WHERE id=$2 AND neon_user_id IS NULL RETURNING id",
+        [identity.id, account.id],
+      );
+      if (!changed.rows.length)
+        throw new HttpError(409, 'This runner was already linked. Please sign in again.');
+      await q('DELETE FROM sessions WHERE player_id=$1', [account.id]);
+    });
+    res.json({ player: await getPlayer(db, account.id) });
   });
   app.post('/api/shop/purchase', requirePlayer, async (req, res) => {
     const { itemId } = z.object({ itemId: z.string() }).parse(req.body);
@@ -463,6 +502,10 @@ export function createApplication(db: Database, options: { limits?: boolean } = 
   });
   app.use('/api', (_req, res) => res.status(404).json({ error: 'API route not found.' }));
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (error instanceof ManagedAuthError) {
+      res.status(error.status).json({ error: error.message, code: error.code });
+      return;
+    }
     if (error instanceof z.ZodError) {
       res.status(400).json({ error: error.issues[0]?.message || 'Invalid input.' });
       return;

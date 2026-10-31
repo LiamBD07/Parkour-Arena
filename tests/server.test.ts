@@ -18,6 +18,8 @@ let db: Database,
   closeArena: () => void;
 process.env.NODE_ENV = 'test';
 process.env.DATABASE_PATH = 'memory://';
+delete process.env.NEON_AUTH_BASE_URL;
+delete process.env.NEON_AUTH_JWKS_URL;
 if (process.env.TEST_DATABASE_URL) process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
 else delete process.env.DATABASE_URL;
 for (const name of [

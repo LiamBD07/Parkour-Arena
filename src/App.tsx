@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { getManagedAccessToken } from './auth-client';
 import {
   ArrowRight,
   ArrowUpRight,
@@ -214,58 +215,71 @@ export default function App() {
     setDialog(null);
     setProfile(false);
   };
-  const startOnline = () => {
+  const startOnline = async () => {
     if (!online) {
       notify('The arena server is offline. You can still practice solo.');
       return;
     }
+    let accessToken: string | null;
+    try {
+      accessToken = await getManagedAccessToken();
+    } catch (e) {
+      notify((e as Error).message);
+      return;
+    }
     networkRef.current?.close();
     setQueue({ waiting: 1, wait: 12 });
-    const net = new ArenaNetwork(course.id, classId, config.stun, {
-      onQueue: (waiting, wait) => setQueue({ waiting, wait }),
-      onMatch: (match: Match) => {
-        const map = COURSES.find((c) => c.id === match.map)!;
-        const rivals: Rival[] = match.members
-          .filter((m) => m.id !== net.id)
-          .map((m, i) => ({
-            id: m.id,
-            name: `${m.name}${m.bot ? ' · BOT' : ''}`,
-            color: ITEMS.find((s) => s.id === m.skin)?.color || '#70c9df',
-            live: !m.bot,
-            frames: m.bot ? botReplay(map, botDuration(m.mmr, i), i) : undefined,
-          }));
-        const next: RaceConfig = {
-          id: match.room,
-          course: map,
-          classId,
-          rivals,
-          ticket: null,
-          multiplayer: true,
-          startsAt: match.startsAt,
-        };
-        raceRef.current = next;
-        setRace(next);
-        setQueue(null);
-        setDialog(null);
-      },
-      onState: (state) => engineRef.current?.updatePeer(state),
-      onDisconnect: (id) => {
-        engineRef.current?.replaceWithBot(id, botDuration(player?.mmr || 1000));
-        notify('A runner disconnected. A bot is taking their line.');
-      },
-      onError: (message) => {
-        notify(message);
-        if (raceRef.current?.multiplayer) {
-          for (const rival of raceRef.current.rivals)
-            if (rival.live)
-              engineRef.current?.replaceWithBot(rival.id, botDuration(player?.mmr || 1000));
-        } else {
+    const net = new ArenaNetwork(
+      course.id,
+      classId,
+      config.stun,
+      {
+        onQueue: (waiting, wait) => setQueue({ waiting, wait }),
+        onMatch: (match: Match) => {
+          const map = COURSES.find((c) => c.id === match.map)!;
+          const rivals: Rival[] = match.members
+            .filter((m) => m.id !== net.id)
+            .map((m, i) => ({
+              id: m.id,
+              name: `${m.name}${m.bot ? ' · BOT' : ''}`,
+              color: ITEMS.find((s) => s.id === m.skin)?.color || '#70c9df',
+              live: !m.bot,
+              frames: m.bot ? botReplay(map, botDuration(m.mmr, i), i) : undefined,
+            }));
+          const next: RaceConfig = {
+            id: match.room,
+            course: map,
+            classId,
+            rivals,
+            ticket: null,
+            multiplayer: true,
+            startsAt: match.startsAt,
+          };
+          raceRef.current = next;
+          setRace(next);
           setQueue(null);
-          networkRef.current?.close();
-          networkRef.current = null;
-        }
+          setDialog(null);
+        },
+        onState: (state) => engineRef.current?.updatePeer(state),
+        onDisconnect: (id) => {
+          engineRef.current?.replaceWithBot(id, botDuration(player?.mmr || 1000));
+          notify('A runner disconnected. A bot is taking their line.');
+        },
+        onError: (message) => {
+          notify(message);
+          if (raceRef.current?.multiplayer) {
+            for (const rival of raceRef.current.rivals)
+              if (rival.live)
+                engineRef.current?.replaceWithBot(rival.id, botDuration(player?.mmr || 1000));
+          } else {
+            setQueue(null);
+            networkRef.current?.close();
+            networkRef.current = null;
+          }
+        },
       },
-    });
+      accessToken || undefined,
+    );
     networkRef.current = net;
   };
   const start = () => (mode === 'solo' ? void startSolo() : startOnline());
