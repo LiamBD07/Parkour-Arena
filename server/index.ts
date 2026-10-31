@@ -5,14 +5,11 @@ import express from 'express';
 import { openDatabase, migrate } from './db.js';
 import { createApplication } from './app.js';
 import { attachMatchmaking } from './matchmaking.js';
+import { configureAppOrigin } from './config.js';
 
 if (existsSync('.env')) process.loadEnvFile('.env');
 const port = Number(process.env.PORT || 3000);
-if (process.env.NODE_ENV === 'production') {
-  const origin = process.env.APP_ORIGIN;
-  if (!origin || !origin.startsWith('https://'))
-    throw new Error('APP_ORIGIN must be the public HTTPS Render URL in production.');
-}
+configureAppOrigin(process.env);
 const db = await openDatabase();
 await migrate(db);
 const app = createApplication(db);
