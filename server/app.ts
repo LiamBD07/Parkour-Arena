@@ -5,6 +5,7 @@ import { rateLimit } from 'express-rate-limit';
 import { randomUUID } from 'node:crypto';
 import Stripe from 'stripe';
 import { z } from 'zod';
+import { POSES } from '../shared/movement.js';
 import {
   COURSES,
   ITEMS,
@@ -48,7 +49,9 @@ const frameSchema = z.object({
     z.number().min(-20).max(180),
   ]),
   yaw: z.number().min(-100).max(100),
-  pose: z.enum(['run', 'slide', 'dive', 'flip', 'idle']),
+  pose: z.enum(POSES),
+  phase: z.number().min(0).max(1).optional(),
+  wallSide: z.number().min(-1).max(1).optional(),
 });
 const packs: Record<string, number> = { '1000': 1000, '2800': 2800, '6500': 6500 };
 export const paymentsEnabled = () =>

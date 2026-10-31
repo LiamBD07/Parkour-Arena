@@ -1,5 +1,6 @@
 import type { Player } from '../shared/game';
 import { getManagedAccessToken, getManagedAuthClient } from './auth-client';
+import { DEFAULT_BINDINGS, normalizeBindings, type Bindings } from './game/controls';
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -47,8 +48,20 @@ export interface Settings {
   sound: boolean;
   sensitivity: number;
   quality: 'high' | 'low';
+  alwaysSprint: boolean;
+  bindings: Bindings;
 }
-export const defaultSettings: Settings = { sound: false, sensitivity: 1, quality: 'high' };
+export const defaultSettings: Settings = {
+  sound: false,
+  sensitivity: 1,
+  quality: 'high',
+  alwaysSprint: true,
+  bindings: { ...DEFAULT_BINDINGS },
+};
+export function loadSettings(): Settings {
+  const saved = readLocal<Partial<Settings>>('pa-settings', {});
+  return { ...defaultSettings, ...saved, bindings: normalizeBindings(saved.bindings) };
+}
 export function readLocal<T>(key: string, fallback: T): T {
   try {
     const value = localStorage.getItem(key);

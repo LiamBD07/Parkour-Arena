@@ -4124,3 +4124,134 @@ kbd {
     gap: 13px;
   }
 }
+/* Controls stay reachable from both the menu and the paused race. */
+.bindings-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 26px 0 16px;
+}
+.bindings-heading strong {
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  color: var(--lime);
+}
+.bindings-heading p {
+  font-size: 10px;
+  line-height: 1.8;
+  color: var(--muted);
+  margin-top: 8px;
+}
+.bindings-heading .text-button {
+  flex-shrink: 0;
+  font-size: 10px;
+}
+.keybindings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 25px;
+}
+.keybinding {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.keybinding > span {
+  font-size: 11px;
+  color: #bbc8be;
+}
+.binding-button {
+  border: 1px solid #536554;
+  background: #121f23;
+  color: #d2e1c8;
+  min-width: 100px;
+  padding: 10px 12px;
+  font-size: 9px;
+  letter-spacing: 1px;
+}
+.binding-button:hover,
+.binding-button.listening {
+  border-color: var(--lime);
+  color: var(--lime);
+  background: #c7ef5c0d;
+}
+.binding-status {
+  font-size: 10px;
+  color: #9eb092;
+  line-height: 1.8;
+  margin-top: 19px;
+}
+.race-movement-state {
+  position: absolute;
+  top: 128px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  padding: 8px 15px;
+  color: #d9ebc4;
+  background: #152a29a3;
+  border: 1px solid #c7ef5c33;
+  pointer-events: none;
+}
+.race-controls-hint > span {
+  margin-left: 10px;
+  color: #d2e4bf;
+}
+.pause-panel > .button {
+  white-space: normal;
+  line-height: 1.6;
+}
+@media (max-width: 680px) {
+  .keybindings-grid {
+    grid-template-columns: 1fr;
+  }
+  .bindings-heading {
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .bindings-heading p {
+    font-size: 9px;
+  }
+  .keybinding > span {
+    font-size: 10px;
+  }
+  .binding-button {
+    min-width: 110px;
+  }
+  .race-movement-state {
+    top: 109px;
+    font-size: 6px;
+    padding: 6px 10px;
+  }
+  .race-controls-hint {
+    overflow: hidden;
+    gap: 4px;
+    font-size: 5px;
+  }
+  .race-controls-hint > span {
+    margin-left: 4px;
+    font-size: 4px;
+  }
+  .race-ability .ability-key kbd {
+    font-size: 12px;
+  }
+}
+@media (pointer: coarse) {
+  .race-controls-hint {
+    display: none;
+  }
+  .race-speed,
+  .race-ability {
+    bottom: 24px;
+  }
+  .touch-stick,
+  .touch-actions {
+    bottom: 145px;
+  }
+}

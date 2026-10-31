@@ -1,3 +1,4 @@
+import { keyLabel } from '../game/controls';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowUpRight,
@@ -238,7 +239,7 @@ export function PlayPage({
             <span className="muted">{character.ability}</span>
           </div>
           <span className="class-bottom">
-            <kbd>Q</kbd>
+            <kbd>{keyLabel(settings.bindings.ability)}</kbd>
             <span>{character.role}</span>
             <ArrowUpRight size={16} />
           </span>
@@ -363,10 +364,12 @@ export function MapsPage({
   );
 }
 export function ClassDialog({
+  abilityKey,
   selected,
   onSelect,
   onClose,
 }: {
+  abilityKey: string;
   selected: ClassId;
   onSelect: (id: ClassId) => void;
   onClose: () => void;
@@ -390,7 +393,7 @@ export function ClassDialog({
             <h3>{c.name}</h3>
             <p>{c.description}</p>
             <div className="class-ability">
-              <kbd>Q</kbd>
+              <kbd>{keyLabel(abilityKey)}</kbd>
               <span>
                 {c.ability}
                 <small>{c.cooldown}s cooldown</small>

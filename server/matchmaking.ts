@@ -5,6 +5,7 @@ import type { Database } from './db.js';
 import { sessionPlayer } from './auth.js';
 import { getPlayer } from './app.js';
 import { z } from 'zod';
+import { POSES } from '../shared/movement.js';
 import { managedAuthEnabled, managedPlayer } from './neon-auth.js';
 
 interface Member {
@@ -44,7 +45,9 @@ const stateSchema = z.object({
     z.number().min(-20).max(180),
   ]),
   yaw: z.number().min(-100).max(100),
-  pose: z.enum(['idle', 'run', 'slide', 'dive', 'flip']),
+  pose: z.enum(POSES),
+  phase: z.number().min(0).max(1).optional(),
+  wallSide: z.number().min(-1).max(1).optional(),
   progress: z.number().min(0).max(1),
   finished: z.number().min(8000).max(600000).optional(),
 });

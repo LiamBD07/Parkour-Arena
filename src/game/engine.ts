@@ -9,8 +9,9 @@ import {
   type Pose,
 } from '../../shared/game';
 import { botReplay, interpolateReplay } from '../../shared/replay';
-import { createRunner, platformTop, stepRunner, type Input } from './physics';
+import { createRunner, platformTop, stepRunner, motionPhase } from './physics';
 import { makeCharacter, type Character } from './character';
+import { RunnerControls, FixedStepper, type Action, type Bindings } from './controls';
 
 export interface Rival {
   id: string;
@@ -26,6 +27,7 @@ export interface HudState {
   cooldown: number;
   progress: number;
   grounded: boolean;
+  pose: Pose;
   message: string;
   countdown: number;
   falls: number;
@@ -41,6 +43,8 @@ export interface EngineOptions {
   startsAt?: number;
   sensitivity?: number;
   quality?: 'high' | 'low';
+  bindings?: Bindings;
+  alwaysSprint?: boolean;
   onHud?: (hud: HudState) => void;
   onFinish?: (time: number, frames: GhostFrame[], falls: number) => void;
   onState?: (state: Omit<PeerState, 'id'>) => void;
@@ -58,13 +62,14 @@ export class ArenaEngine {
   private runner;
   private character: Character;
   private platformMeshes: THREE.Group[] = [];
+  private gateBeams: { mesh: THREE.Mesh; bounds: THREE.Box3 }[] = [];
   private rivals = new Map<
     string,
     { data: Rival; character: Character; state?: PeerState; latest: number }
   >();
-  private keys = new Set<string>();
-  private touches = { forward: 0, right: 0 };
-  private actions = new Set<string>();
+  private controls: RunnerControls;
+  private simulation = new FixedStepper();
+  private wasLocked = false;
   private yaw = 0;
   private pitch = 0.18;
   private paused = false;
@@ -73,7 +78,6 @@ export class ArenaEngine {
   private lastSample = -100;
   private lastHud = 0;
   private lastState = 0;
-  private accumulator = 0;
   private done = false;
   private message = '';
   private messageUntil = 0;
@@ -88,6 +92,7 @@ export class ArenaEngine {
     private container: HTMLElement,
     private options: EngineOptions,
   ) {
+    this.controls = new RunnerControls(options.bindings, options.alwaysSprint ?? true);
     this.course = options.course || COURSES[0];
     this.runner = createRunner(this.course);
     this.frames = [{ t: 0, p: [...this.course.start], yaw: 0, pose: 'idle' }];
@@ -140,6 +145,9 @@ export class ArenaEngine {
     document.addEventListener('mousemove', this.onMouse);
     document.addEventListener('pointerlockchange', this.onPointerLock);
     this.renderer.domElement.addEventListener('click', this.onCanvasClick);
+    window.addEventListener('mousedown', this.onMouseDown);
+    window.addEventListener('mouseup', this.onMouseUp);
+    this.renderer.domElement.addEventListener('contextmenu', this.onContextMenu);
     this.began =
       performance.now() + Math.max(500, (options.startsAt || Date.now() + 3000) - Date.now());
     this.loop();
@@ -362,7 +370,10 @@ export class ArenaEngine {
           this.box([0.2, 5, 0.25], [x + s * 5.2, y + 2.5, z], gateMaterial);
           this.box([0.48, 0.5, 0.65], [x + s * 5.2, y + 0.25, z], dark);
         }
-        this.box([10.6, 0.16, 0.24], [x, y + 5, z], gateMaterial);
+        const beamMaterial = gateMaterial.clone();
+        beamMaterial.transparent = true;
+        const beam = this.box([10.6, 0.16, 0.24], [x, y + 5, z], beamMaterial);
+        this.gateBeams.push({ mesh: beam, bounds: new THREE.Box3().setFromObject(beam) });
         if (i > 0) {
           const sign = this.makeSign(
             cp.label,
@@ -424,23 +435,46 @@ export class ArenaEngine {
     this.camera.updateProjectionMatrix();
   }
   private onKeyDown = (e: KeyboardEvent) => {
-    if (this.options.mode !== 'race' || (e.target as HTMLElement)?.matches('input,textarea,select'))
+    if (
+      this.options.mode !== 'race' ||
+      (e.target as HTMLElement)?.closest('input,textarea,select,[role="dialog"]')
+    )
       return;
-    if (e.code === 'Space' && (e.target as HTMLElement)?.matches('button')) return;
-    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code))
+    const action = this.controls.actionFor(e.code);
+    if (e.code === 'Escape' || action === 'pause') {
+      if (!e.repeat) this.options.onPause?.();
       e.preventDefault();
-    if (e.code === 'Escape' || e.code === 'KeyP') {
-      this.options.onPause?.();
       return;
     }
-    if (!e.repeat) this.actions.add(e.code);
-    this.keys.add(e.code);
+    if (this.paused || this.done) return;
+    if (action || e.code.startsWith('Arrow')) e.preventDefault();
+    this.controls.down(e.code, performance.now(), e.repeat);
   };
   private onKeyUp = (e: KeyboardEvent) => {
-    this.keys.delete(e.code);
+    this.controls.up(e.code);
+  };
+  private onMouseDown = (e: MouseEvent) => {
+    if (
+      this.options.mode !== 'race' ||
+      this.paused ||
+      this.done ||
+      document.pointerLockElement !== this.renderer.domElement
+    )
+      return;
+    const code = `Mouse${e.button}`;
+    if (!this.controls.actionFor(code)) return;
+    e.preventDefault();
+    if (this.controls.actionFor(code) === 'pause') this.options.onPause?.();
+    else this.controls.down(code, performance.now());
+  };
+  private onMouseUp = (e: MouseEvent) => {
+    this.controls.up(`Mouse${e.button}`);
+  };
+  private onContextMenu = (e: MouseEvent) => {
+    if (document.pointerLockElement === this.renderer.domElement) e.preventDefault();
   };
   private onBlur = () => {
-    this.keys.clear();
+    this.controls.clear();
     if (this.options.mode === 'race' && !this.done && !this.paused) this.options.onPause?.();
   };
   private onMouse = (e: MouseEvent) => {
@@ -449,7 +483,12 @@ export class ArenaEngine {
     this.pitch = Math.max(-0.3, Math.min(0.8, this.pitch + e.movementY * 0.0015));
   };
   private onPointerLock = () => {
-    if (!document.pointerLockElement) this.keys.clear();
+    const locked = document.pointerLockElement === this.renderer.domElement;
+    if (this.wasLocked && !locked) {
+      this.controls.clear();
+      if (!this.paused && !this.done) this.options.onPause?.();
+    }
+    this.wasLocked = locked;
   };
   private onCanvasClick = () => {
     if (this.options.mode === 'race' && !this.paused && !this.done)
@@ -457,23 +496,27 @@ export class ArenaEngine {
   };
   setPaused(paused: boolean) {
     this.paused = paused;
-    this.keys.clear();
-    this.actions.clear();
+    this.controls.clear();
     if (paused && document.pointerLockElement) document.exitPointerLock();
     if (!paused) this.renderer.domElement.focus({ preventScroll: true });
   }
   setSound(enabled: boolean) {
     this.sound = enabled;
   }
+  updateControls(bindings: Bindings, alwaysSprint: boolean, sensitivity: number) {
+    this.controls.bindings = bindings;
+    this.controls.alwaysSprint = alwaysSprint;
+    this.options.sensitivity = sensitivity;
+    this.controls.clear();
+  }
   touchMove(forward: number, right: number) {
-    this.touches = { forward, right };
+    this.controls.move(forward, right);
   }
-  touchAction(action: string) {
-    this.actions.add(action);
+  touchAction(action: Action) {
+    this.controls.press(action, performance.now());
   }
-  touchHold(action: string, down: boolean) {
-    if (down) this.keys.add(action);
-    else this.keys.delete(action);
+  touchHold(action: Action, down: boolean) {
+    this.controls.hold(action, down);
   }
   touchLook(dx: number, dy: number) {
     this.yaw -= dx * 0.006;
@@ -520,7 +563,7 @@ export class ArenaEngine {
   private loop = () => {
     if (this.disposed) return;
     this.animation = requestAnimationFrame(this.loop);
-    const delta = Math.min(0.05, this.clock.getDelta());
+    const delta = Math.min(0.15, this.clock.getDelta());
     const now = performance.now();
     if (this.options.mode === 'race') {
       const elapsed = Math.max(0, now - this.began),
@@ -535,46 +578,23 @@ export class ArenaEngine {
         this.lastSample = elapsed;
       }
       if (!countdown && !this.paused && !this.done) {
-        const input: Input = {
-          forward:
-            (this.keys.has('KeyW') || this.keys.has('ArrowUp') ? 1 : 0) -
-            (this.keys.has('KeyS') || this.keys.has('ArrowDown') ? 1 : 0) +
-            this.touches.forward,
-          right:
-            (this.keys.has('KeyD') || this.keys.has('ArrowRight') ? 1 : 0) -
-            (this.keys.has('KeyA') || this.keys.has('ArrowLeft') ? 1 : 0) +
-            this.touches.right,
-          jump: this.actions.has('Space'),
-          sprint:
-            this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.touches.forward > 0.7,
-          crouch: this.keys.has('KeyC') || this.actions.has('KeyC'),
-          flip: this.actions.has('KeyF'),
-          dive: this.actions.has('KeyX'),
-          ability: this.actions.has('KeyQ'),
-          wall: this.keys.has('KeyE') || this.actions.has('KeyE'),
-          yaw: this.yaw,
-        };
-        this.accumulator += delta;
-        while (this.accumulator >= 1 / 120) {
-          stepRunner(this.runner, input, this.course, this.options.classId || 'runner', 1 / 120);
+        this.simulation.advance(delta, (dt) => {
+          const input = this.controls.consume(now, this.yaw);
+          stepRunner(this.runner, input, this.course, this.options.classId || 'runner', dt);
           if (this.runner.message) {
             this.message = this.runner.message;
             this.messageUntil = now + 1600;
             if (this.message === 'CHECKPOINT') this.beep(880);
           }
-          input.jump = false;
-          input.flip = false;
-          input.ability = false;
-          input.dive = false;
-          this.accumulator -= 1 / 120;
-        }
-        this.actions.clear();
+        });
         if (elapsed - this.lastSample >= 95 || this.runner.finished) {
           this.frames.push({
             t: Math.floor(elapsed),
             p: [...this.runner.p],
             yaw: this.yaw,
             pose: this.runner.pose,
+            phase: motionPhase(this.runner),
+            wallSide: this.runner.wallSide,
           });
           this.lastSample = elapsed;
         }
@@ -595,7 +615,19 @@ export class ArenaEngine {
       const s = this.runner;
       this.character.group.position.set(...s.p);
       this.character.group.rotation.y = this.yaw;
-      this.character.animate(s.time, Math.hypot(s.v[0], s.v[2]), s.pose);
+      const contact = s.vault?.contact;
+      const handTarget = contact
+        ? new THREE.Vector3(
+            contact[0] - s.p[0],
+            contact[1] - s.p[1],
+            contact[2] - s.p[2],
+          ).applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.yaw)
+        : undefined;
+      this.character.animate(s.time, Math.hypot(s.v[0], s.v[2]), s.pose, {
+        phase: motionPhase(s),
+        wallSide: s.wallSide,
+        handTarget,
+      });
       this.platformMeshes.forEach((g, i) => {
         const p = this.course.platforms[i];
         g.position.y = platformTop(p, i, s) - p.size[1] / 2;
@@ -625,7 +657,10 @@ export class ArenaEngine {
           if (r.data.live) r.character.group.position.lerp(point, Math.min(1, delta * 12));
           else r.character.group.position.copy(point);
           r.character.group.rotation.y = frame.yaw;
-          r.character.animate(elapsed / 1000, 9, frame.pose as Pose);
+          r.character.animate(elapsed / 1000, 9, frame.pose as Pose, {
+            phase: frame.phase,
+            wallSide: frame.wallSide,
+          });
           const progress = Math.max(0, Math.min(1, (frame.p[2] + 5) / 156));
           rivalHud.push({
             id,
@@ -648,6 +683,7 @@ export class ArenaEngine {
           cooldown: s.cooldown,
           progress,
           grounded: s.grounded,
+          pose: s.pose,
           message: now < this.messageUntil ? this.message : '',
           countdown,
           falls: s.falls,
@@ -656,7 +692,14 @@ export class ArenaEngine {
         this.lastHud = now;
       }
       if (now - this.lastState > 95 && !this.done) {
-        this.options.onState?.({ p: [...s.p], yaw: this.yaw, pose: s.pose, progress });
+        this.options.onState?.({
+          p: [...s.p],
+          yaw: this.yaw,
+          pose: s.pose,
+          phase: motionPhase(s),
+          wallSide: s.wallSide,
+          progress,
+        });
         this.lastState = now;
       }
     } else {
@@ -670,6 +713,19 @@ export class ArenaEngine {
         this.camera.lookAt(-2, 5.2, 26);
       }
       this.character.animate(t, 0, 'idle');
+    }
+    // A dive can lift the chase camera through an overhead checkpoint bar.
+    // Fade nearby decorative bars so they never cover the runner or route.
+    for (const { mesh, bounds } of this.gateBeams) {
+      const opacity = THREE.MathUtils.clamp(
+        (bounds.distanceToPoint(this.camera.position) - 0.25) / 1.5,
+        0,
+        1,
+      );
+      const material = mesh.material as THREE.MeshStandardMaterial;
+      material.opacity = opacity;
+      material.depthWrite = opacity === 1;
+      mesh.visible = opacity > 0;
     }
     if (this.wind) this.wind.position.x = Math.sin(now / 12000) * 5;
     if (this.trail) {
@@ -701,6 +757,9 @@ export class ArenaEngine {
     this.observer.disconnect();
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('mousedown', this.onMouseDown);
+    window.removeEventListener('mouseup', this.onMouseUp);
+    this.renderer.domElement.removeEventListener('contextmenu', this.onContextMenu);
     window.removeEventListener('blur', this.onBlur);
     document.removeEventListener('mousemove', this.onMouse);
     document.removeEventListener('pointerlockchange', this.onPointerLock);

@@ -7,6 +7,7 @@ import {
   Ghost,
   LoaderCircle,
   Pause,
+  Settings as SettingsIcon,
   Play,
   RotateCcw,
   Trophy,
@@ -28,6 +29,8 @@ import { ArenaEngine, type HudState, type Rival } from '../game/engine';
 import type { ArenaNetwork } from '../game/network';
 import { Scene, Logo, Credits } from './Primitives';
 import type { LocalRecord } from './Pages';
+import { SettingsDialog } from './Dialogs';
+import { keyLabel, type Action } from '../game/controls';
 
 export interface RaceConfig {
   id: string;
@@ -41,6 +44,7 @@ export interface RaceConfig {
 interface Props {
   config: RaceConfig;
   settings: Settings;
+  onSettings: (settings: Settings) => void;
   player: Player | null;
   color: string;
   trailColor?: string;
@@ -68,6 +72,7 @@ const emptyHud: HudState = {
   cooldown: 0,
   progress: 0,
   grounded: true,
+  pose: 'idle',
   message: '',
   countdown: 3,
   falls: 0,
@@ -76,6 +81,7 @@ const emptyHud: HudState = {
 export function Race({
   config,
   settings,
+  onSettings,
   player,
   color,
   trailColor,
@@ -91,6 +97,8 @@ export function Race({
     [paused, setPaused] = useState(false),
     [result, setResult] = useState<Result | null>(null),
     [sound, setSound] = useState(settings.sound);
+  const [controlsOpen, setControlsOpen] = useState(false);
+  const closeControls = useCallback(() => setControlsOpen(false), []);
   const [graphicsError, setGraphicsError] = useState(false);
   const pausedRef = useRef(false),
     resultRef = useRef(false),
@@ -154,6 +162,8 @@ export function Race({
       startsAt: config.startsAt,
       quality: settings.quality,
       sensitivity: settings.sensitivity,
+      bindings: settings.bindings,
+      alwaysSprint: settings.alwaysSprint,
       onHud: setHud,
       onFinish: finish,
       onPause: pause,
@@ -166,12 +176,19 @@ export function Race({
   useEffect(() => {
     engineRef.current?.setSound(sound);
   }, [sound, engineRef]);
+  useEffect(() => {
+    engineRef.current?.updateControls(
+      settings.bindings,
+      settings.alwaysSprint,
+      settings.sensitivity,
+    );
+  }, [settings.bindings, settings.alwaysSprint, settings.sensitivity, engineRef]);
   const standings = [
     { id: 'you', name: player?.username || 'YOU', progress: hud.progress, finished: result?.time },
     ...hud.rivals,
   ].sort((a, b) => (a.finished ?? Infinity) - (b.finished ?? Infinity) || b.progress - a.progress);
   const cls = CLASSES.find((c) => c.id === config.classId)!;
-  const touchAction = (action: string) => engineRef.current?.touchAction(action);
+  const touchAction = (action: Action) => engineRef.current?.touchAction(action);
   return (
     <div className="race-screen">
       <Scene
@@ -269,7 +286,7 @@ export function Race({
           </div>
           <div className="race-ability">
             <div className={`ability-key ${hud.cooldown ? 'cooling' : ''}`}>
-              <kbd>Q</kbd>
+              <kbd>{keyLabel(settings.bindings.ability)}</kbd>
               {hud.cooldown > 0 && <span>{Math.ceil(hud.cooldown)}</span>}
             </div>
             <div>
@@ -281,8 +298,31 @@ export function Race({
             </div>
           </div>
           <div className="race-controls-hint">
-            <kbd>SPACE</kbd> JUMP <kbd>C</kbd> SLIDE <kbd>F</kbd> FLIP <kbd>E</kbd> WALL RUN{' '}
-            <kbd>P</kbd> PAUSE
+            <kbd>{keyLabel(settings.bindings.jump)}</kbd> JUMP{' '}
+            <kbd>{keyLabel(settings.bindings.dive)}</kbd> DIVE / VAULT{' '}
+            <kbd>{keyLabel(settings.bindings.roll)}</kbd> ROLL{' '}
+            <kbd>{keyLabel(settings.bindings.slide)}</kbd> SLIDE <span>WALL RUN: AUTO</span>{' '}
+            <kbd>{keyLabel(settings.bindings.pause)}</kbd> PAUSE
+          </div>
+          <div
+            className="race-movement-state"
+            data-pose={hud.pose}
+            data-grounded={String(hud.grounded)}
+          >
+            {
+              {
+                idle: 'READY',
+                run: 'RUNNING',
+                jump: 'IN THE AIR',
+                fall: 'FALLING',
+                slide: 'SLIDE',
+                dive: 'FORWARD DIVE',
+                roll: 'GROUND ROLL',
+                vault: 'PULL VAULT',
+                flip: 'AIR FLIP',
+                wallrun: 'WALL RUN',
+              }[hud.pose]
+            }
           </div>
         </>
       )}
@@ -338,23 +378,23 @@ export function Race({
           </div>
           <div className="touch-actions">
             {[
-              ['KeyQ', 'ABILITY'],
-              ['KeyC', 'SLIDE'],
-              ['Space', 'JUMP'],
-              ['KeyF', 'FLIP'],
-              ['KeyE', 'WALL'],
-              ['KeyX', 'DIVE'],
+              ['ability', 'ABILITY'],
+              ['slide', 'SLIDE'],
+              ['jump', 'JUMP'],
+              ['dive', 'DIVE'],
+              ['roll', 'ROLL'],
+              ['flip', 'FLIP'],
             ].map(([key, label]) => (
               <button
                 key={key}
                 onPointerDown={(e) => {
                   e.preventDefault();
                   e.currentTarget.setPointerCapture(e.pointerId);
-                  if (key === 'KeyC' || key === 'KeyE') engineRef.current?.touchHold(key, true);
-                  else touchAction(key);
+                  if (key === 'slide') engineRef.current?.touchHold('slide', true);
+                  else touchAction(key as Action);
                 }}
-                onPointerUp={() => engineRef.current?.touchHold(key, false)}
-                onPointerCancel={() => engineRef.current?.touchHold(key, false)}
+                onPointerUp={() => engineRef.current?.touchHold(key as Action, false)}
+                onPointerCancel={() => engineRef.current?.touchHold(key as Action, false)}
               >
                 {label}
               </button>
@@ -380,6 +420,10 @@ export function Race({
               <Play size={17} fill="currentColor" />
               BACK TO THE ROOFTOPS
             </button>
+            <button className="button secondary full" onClick={() => setControlsOpen(true)}>
+              <SettingsIcon size={17} />
+              CONTROLS & SETTINGS
+            </button>
             <button className="button secondary full" onClick={onRetry}>
               <RotateCcw size={17} />
               RESTART RUN
@@ -390,6 +434,9 @@ export function Race({
             </button>
           </div>
         </div>
+      )}
+      {controlsOpen && (
+        <SettingsDialog settings={settings} onChange={onSettings} onClose={closeControls} />
       )}
       {result && (
         <div className="race-overlay">

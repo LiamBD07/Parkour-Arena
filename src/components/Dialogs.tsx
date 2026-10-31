@@ -1,4 +1,12 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
+import {
+  ACTIONS,
+  DEFAULT_BINDINGS,
+  keyLabel,
+  rebind,
+  validBinding,
+  type Action,
+} from '../game/controls';
 import {
   ArrowRight,
   Check,
@@ -205,18 +213,32 @@ export function AuthDialog({
     </Modal>
   );
 }
-export function ControlsDialog({ onClose }: { onClose: () => void }) {
+export function ControlsDialog({ onClose, settings }: { onClose: () => void; settings: Settings }) {
+  const b = settings.bindings;
   const controls = [
-    ['W A S D', 'Move · arrow keys also work'],
+    [
+      keyLabel(b.forward) +
+        ' / ' +
+        keyLabel(b.left) +
+        ' / ' +
+        keyLabel(b.back) +
+        ' / ' +
+        keyLabel(b.right),
+      'Move · arrow keys also work unless rebound',
+    ],
     ['MOUSE', 'Look · click the course to capture cursor'],
-    ['SHIFT', 'Sprint · keep your momentum'],
-    ['SPACE', 'Jump · time it near the edge'],
-    ['C', 'Slide / crouch · pass under low beams'],
-    ['E', 'Wall run · hold near amber grip walls'],
-    ['X', 'Dive · tuck into a landing roll'],
-    ['F', 'Air flip · finish the rotation for a boost'],
-    ['Q', 'Class ability · watch the cooldown'],
-    ['P / ESC', 'Pause · timer keeps running'],
+    [
+      settings.alwaysSprint ? 'AUTO' : keyLabel(b.sprint),
+      settings.alwaysSprint ? 'Always sprint · no modifier needed' : 'Hold to sprint',
+    ],
+    [keyLabel(b.jump), 'Jump / push away from a wall'],
+    [keyLabel(b.slide), 'Hold to slide / crouch under low beams'],
+    ['AUTO', `Wall run · touch a grip wall in the air; ${keyLabel(b.jump)} pushes away`],
+    [keyLabel(b.dive), 'Dive forward · pull vault when a beam is in reach'],
+    [keyLabel(b.roll), 'Forward roll on the ground · jump cancels it'],
+    [keyLabel(b.flip), 'Air flip · complete the rotation for a landing boost'],
+    [keyLabel(b.ability), 'Class ability'],
+    [keyLabel(b.pause) + ' / ESC', 'Pause · change bindings from the pause menu'],
   ];
   return (
     <Modal title="FIND YOUR FLOW." eyebrow="THE MOVEMENT MANUAL" onClose={onClose} wide>
@@ -225,7 +247,7 @@ export function ControlsDialog({ onClose }: { onClose: () => void }) {
       </p>
       <div className="controls-grid">
         {controls.map(([key, desc]) => (
-          <div className="control-row" key={key}>
+          <div className="control-row" key={desc}>
             <kbd>{key}</kbd>
             <span>{desc}</span>
           </div>
@@ -234,7 +256,8 @@ export function ControlsDialog({ onClose }: { onClose: () => void }) {
       <div className="tip-box">
         <span>PRO TIP</span>Flip early in your jump. A completed flip boosts your landing; an
         unfinished one costs a little momentum. The hinged orange roof drops shortly after you touch
-        it.
+        it. Dive onto a low beam to plant your hands and pull yourself over it for a speed boost.
+        Wall running is automatic and slowly loses height.
       </div>
       <p className="fine-print">
         On touch screens, use the left stick to move, drag the right side to look, and tap the
@@ -256,8 +279,53 @@ export function SettingsDialog({
   onChange: (settings: Settings) => void;
   onClose: () => void;
 }) {
+  const [listening, setListening] = useState<Action | null>(null);
+  const [bindingMessage, setBindingMessage] = useState('');
+  useEffect(() => {
+    if (!listening) return;
+    const capture = (code: string, event: Event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (code === 'Escape') {
+        setListening(null);
+        return;
+      }
+      if (!validBinding(code)) {
+        setBindingMessage(
+          'That key is reserved. Choose a letter, modifier, arrow or mouse button.',
+        );
+        return;
+      }
+      onChange({ ...settings, bindings: rebind(settings.bindings, listening, code) });
+      setListening(null);
+      setBindingMessage('Saved. Duplicate bindings swap automatically.');
+    };
+    const keyboard = (event: KeyboardEvent) => {
+      if (!event.repeat) capture(event.code, event);
+    };
+    const mouse = (event: MouseEvent) => {
+      // The click/context menu following this press belongs to binding capture,
+      // so it must not activate another settings button after capture closes.
+      if (event.button === 0 || event.button === 2) {
+        const type = event.button === 0 ? 'click' : 'contextmenu';
+        const stop = (next: Event) => {
+          next.preventDefault();
+          next.stopImmediatePropagation();
+        };
+        window.addEventListener(type, stop, { capture: true, once: true });
+        window.setTimeout(() => window.removeEventListener(type, stop, true), 1500);
+      }
+      capture(`Mouse${event.button}`, event);
+    };
+    window.addEventListener('keydown', keyboard, true);
+    window.addEventListener('mousedown', mouse, true);
+    return () => {
+      window.removeEventListener('keydown', keyboard, true);
+      window.removeEventListener('mousedown', mouse, true);
+    };
+  }, [listening, settings, onChange]);
   return (
-    <Modal title="YOUR SETUP." eyebrow="ARENA SETTINGS" onClose={onClose}>
+    <Modal title="YOUR SETUP." eyebrow="ARENA SETTINGS" onClose={onClose} wide>
       <div className="setting-row">
         <Volume2 />
         <div>
@@ -307,6 +375,60 @@ export function SettingsDialog({
           <option value="low">Performance</option>
         </select>
       </div>
+      <div className="setting-row">
+        <FootprintsIcon />
+        <div>
+          <strong>Always sprint</strong>
+          <p>Run at full speed without holding Shift</p>
+        </div>
+        <button
+          role="switch"
+          aria-checked={settings.alwaysSprint}
+          aria-label="Always sprint"
+          className={`toggle ${settings.alwaysSprint ? 'on' : ''}`}
+          onClick={() => onChange({ ...settings, alwaysSprint: !settings.alwaysSprint })}
+        >
+          <span />
+        </button>
+      </div>
+      <div className="bindings-heading">
+        <div>
+          <strong>KEYBOARD & MOUSE</strong>
+          <p>Choose an action, then press a key or mouse button. Escape cancels.</p>
+        </div>
+        <button
+          className="text-button"
+          onClick={() => {
+            setListening(null);
+            onChange({ ...settings, bindings: { ...DEFAULT_BINDINGS } });
+            setBindingMessage('Default bindings restored.');
+          }}
+        >
+          Reset bindings
+        </button>
+      </div>
+      <div className="keybindings-grid">
+        {ACTIONS.map(([action, label]) => (
+          <div className="keybinding" key={action}>
+            <span>{label}</span>
+            <button
+              className={`binding-button ${listening === action ? 'listening' : ''}`}
+              aria-label={`Rebind ${label}`}
+              aria-pressed={listening === action}
+              onClick={() => {
+                setListening(action);
+                setBindingMessage('');
+              }}
+            >
+              {listening === action ? 'PRESS A KEY…' : keyLabel(settings.bindings[action])}
+            </button>
+          </div>
+        ))}
+      </div>
+      <p className="binding-status" role="status">
+        {bindingMessage ||
+          'Wall running is automatic. Bindings are saved in this browser and apply immediately.'}
+      </p>
       <button className="button primary full" onClick={onClose}>
         ALL SET
         <Check size={18} />
@@ -393,5 +515,13 @@ export function CurrencyDialog({
         payment confirmation.
       </p>
     </Modal>
+  );
+}
+
+function FootprintsIcon() {
+  return (
+    <span aria-hidden="true" style={{ color: 'var(--lime)', fontSize: 22 }}>
+      ↗
+    </span>
   );
 }

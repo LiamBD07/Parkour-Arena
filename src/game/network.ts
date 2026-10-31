@@ -1,4 +1,5 @@
 import type { PeerState } from '../../shared/game';
+import { POSES } from '../../shared/movement';
 export interface Member {
   id: string;
   name: string;
@@ -98,7 +99,11 @@ export class ArenaNetwork {
       !Number.isFinite(state.progress) ||
       state.progress < 0 ||
       state.progress > 1 ||
-      !['idle', 'run', 'flip', 'slide', 'dive'].includes(state.pose)
+      !POSES.includes(state.pose) ||
+      (state.phase !== undefined &&
+        (!Number.isFinite(state.phase) || state.phase < 0 || state.phase > 1)) ||
+      (state.wallSide !== undefined &&
+        (!Number.isFinite(state.wallSide) || Math.abs(state.wallSide) > 1))
     )
       return;
     this.callbacks.onState(state);

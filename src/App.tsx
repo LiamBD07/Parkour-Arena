@@ -33,7 +33,7 @@ import {
   type Player,
 } from '../shared/game';
 import { botReplay } from '../shared/replay';
-import { api, readLocal, writeLocal, defaultSettings, type Settings } from './api';
+import { api, readLocal, writeLocal, loadSettings, type Settings } from './api';
 import { Logo, Credits, Modal } from './components/Primitives';
 import { AuthDialog, ControlsDialog, CurrencyDialog, SettingsDialog } from './components/Dialogs';
 import {
@@ -66,10 +66,7 @@ export default function App() {
     [player, setPlayer] = useState<Player | null>(null),
     [online, setOnline] = useState(false),
     [booting, setBooting] = useState(true);
-  const [settings, setSettings] = useState<Settings>(() => ({
-    ...defaultSettings,
-    ...readLocal<Partial<Settings>>('pa-settings', {}),
-  }));
+  const [settings, setSettings] = useState<Settings>(loadSettings);
   const [course, setCourse] = useState<Course>(
     () => COURSES.find((c) => c.id === readLocal('pa-course', 'skyline')) || COURSES[0],
   );
@@ -542,6 +539,7 @@ export default function App() {
           key={race.id}
           config={race}
           settings={settings}
+          onSettings={changeSettings}
           player={player}
           color={skin.color}
           trailColor={trail?.color}
@@ -564,7 +562,7 @@ export default function App() {
           }}
         />
       )}
-      {dialog === 'controls' && <ControlsDialog onClose={closeDialog} />}
+      {dialog === 'controls' && <ControlsDialog settings={settings} onClose={closeDialog} />}
       {dialog === 'settings' && (
         <SettingsDialog settings={settings} onChange={changeSettings} onClose={closeDialog} />
       )}
@@ -577,7 +575,12 @@ export default function App() {
         />
       )}
       {dialog === 'class' && (
-        <ClassDialog selected={classId} onSelect={selectClass} onClose={closeDialog} />
+        <ClassDialog
+          abilityKey={settings.bindings.ability}
+          selected={classId}
+          onSelect={selectClass}
+          onClose={closeDialog}
+        />
       )}
       {queue && (
         <Modal

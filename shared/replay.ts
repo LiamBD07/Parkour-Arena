@@ -17,6 +17,13 @@ export function interpolateReplay(frames: GhostFrame[], t: number): GhostFrame |
     p: a.p.map((v, i) => v + (b.p[i] - v) * k) as Vec3,
     yaw: a.yaw + (b.yaw - a.yaw) * k,
     pose: a.pose,
+    phase:
+      a.phase !== undefined
+        ? b.pose === a.pose && b.phase !== undefined
+          ? a.phase + (b.phase - a.phase) * k
+          : a.phase
+        : undefined,
+    wallSide: a.wallSide,
   };
 }
 
@@ -47,7 +54,7 @@ export function botReplay(course: Course, duration = 32000, seed = 0): GhostFram
         z,
       ],
       yaw: Math.atan2(b[0] - a[0], b[2] - a[2]),
-      pose: 'run',
+      pose: arc > 0.4 ? (k < 0.5 ? 'jump' : 'fall') : 'run',
     });
   }
   return frames;

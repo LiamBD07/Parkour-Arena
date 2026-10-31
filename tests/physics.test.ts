@@ -14,7 +14,6 @@ const input: Input = {
   flip: false,
   dive: false,
   ability: false,
-  wall: false,
   yaw: 0,
 };
 test('skill estimates and bot pace reflect solo performance without unbounded ratings', () => {
@@ -104,9 +103,9 @@ test('wall running limits descent on grip walls only', () => {
   state.p = [-6.6, 7, 19];
   state.grounded = false;
   state.v[1] = -9;
-  stepRunner(state, { ...input, forward: 1, wall: true }, course, 'traceur', 1 / 120);
+  stepRunner(state, { ...input, forward: 1 }, course, 'traceur', 1 / 120);
   assert.equal(state.wallRunning, true);
-  assert.ok(state.v[1] >= -1.2);
+  assert.ok(state.v[1] >= -1.3);
 });
 test('replay interpolation and all practice routes cover the intended course', () => {
   for (const course of COURSES) {

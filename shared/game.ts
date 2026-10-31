@@ -1,12 +1,15 @@
 export type Vec3 = [number, number, number];
 export type ClassId = 'runner' | 'traceur' | 'acrobat';
 export type MapId = 'skyline' | 'foundry' | 'harbor';
-export type Pose = 'run' | 'slide' | 'dive' | 'flip' | 'idle';
+export type { MovementPose as Pose } from './movement.js';
+import type { MovementPose as Pose } from './movement.js';
 export interface GhostFrame {
   t: number;
   p: Vec3;
   yaw: number;
   pose: Pose;
+  phase?: number;
+  wallSide?: number;
 }
 export interface Platform {
   p: Vec3;
@@ -230,6 +233,8 @@ export interface PeerState {
   p: Vec3;
   yaw: number;
   pose: Pose;
+  phase?: number;
+  wallSide?: number;
   progress: number;
   finished?: number;
 }
