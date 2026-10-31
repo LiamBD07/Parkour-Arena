@@ -35,6 +35,8 @@ export interface RunnerState {
   boost: number;
   recovery: number;
   flipTime: number;
+  flipDuration: number;
+  flipBuffer: number;
   flipStarted: boolean;
   wallRunning: boolean;
   wallSide: number;
@@ -47,6 +49,9 @@ export interface RunnerState {
   message: string;
   poseTime: number;
   rolling: number;
+  rollUnderBeam: boolean;
+  crouched: boolean;
+  crashTime: number;
   diving: boolean;
   diveUsed: boolean;
   maneuverCooldown: number;
@@ -68,6 +73,8 @@ export function createRunner(course: Course): RunnerState {
     boost: 0,
     recovery: 0,
     flipTime: 0,
+    flipDuration: M.flipDuration,
+    flipBuffer: 0,
     flipStarted: false,
     wallRunning: false,
     wallSide: 0,
@@ -80,6 +87,9 @@ export function createRunner(course: Course): RunnerState {
     message: '',
     poseTime: 0,
     rolling: 0,
+    rollUnderBeam: false,
+    crouched: false,
+    crashTime: 0,
     diving: false,
     diveUsed: false,
     maneuverCooldown: 0,
@@ -102,7 +112,8 @@ function pose(s: RunnerState, value: Pose, dt: number) {
 export function motionPhase(s: RunnerState) {
   if (s.vault) return Math.min(1, s.vault.time / s.vault.duration);
   if (s.pose === 'roll') return Math.min(1, 1 - s.rolling / M.rollDuration);
-  if (s.pose === 'flip') return Math.min(1, s.flipTime / 0.72);
+  if (s.pose === 'flip') return Math.min(1, s.flipTime / s.flipDuration);
+  if (s.pose === 'crash') return Math.min(1, 1 - s.crashTime / M.crashDuration);
   return Math.min(1, s.poseTime / 0.55);
 }
 function advanceCourse(s: RunnerState, course: Course) {
@@ -251,6 +262,61 @@ function findVault(
   }
   return null;
 }
+function rollCanClearBeam(s: RunnerState, direction: [number, number], course: Course) {
+  const speed = Math.hypot(s.v[0], s.v[2]);
+  if (speed <= M.walkSpeed) return false;
+  return course.platforms.some((p, i) => {
+    if (p.kind !== 'obstacle') return false;
+    const clearance = platformTop(p, i, s) - p.size[1] - s.p[1];
+    const ray = horizontalRay(s.p, direction, p);
+    // Preserve entry speed only for a real underpass reachable during this roll.
+    return (
+      clearance >= 1.25 &&
+      clearance < 1.8 &&
+      ray &&
+      ray.exit > 0 &&
+      ray.exit + 0.3 <= speed * M.rollDuration
+    );
+  });
+}
+function lowCeiling(s: RunnerState, course: Course) {
+  return course.platforms.some((p, i) => {
+    const clearance = platformTop(p, i, s) - p.size[1] - s.p[1];
+    return (
+      clearance >= 0.8 &&
+      clearance < 1.8 &&
+      Math.abs(s.p[0] - p.p[0]) < p.size[0] / 2 + 0.28 &&
+      Math.abs(s.p[2] - p.p[2]) < p.size[2] / 2 + 0.28
+    );
+  });
+}
+function timeToLanding(s: RunnerState, course: Course, targetX: number, targetZ: number) {
+  let previousY = s.p[1];
+  // Predict descending roof/obstacle contact, including steering acceleration.
+  // Raised landing surfaces shorten the rotation instead of demanding a full roof-height jump.
+  for (let t = 1 / 120; t <= 1.5; t += 1 / 120) {
+    const vy = s.v[1] - M.gravity * t;
+    const y = s.p[1] + s.v[1] * t - 0.5 * M.gravity * t * t;
+    const drag = (1 - Math.exp(-4.5 * t)) / 4.5;
+    const x = s.p[0] + targetX * t + (s.v[0] - targetX) * drag;
+    const z = s.p[2] + targetZ * t + (s.v[2] - targetZ) * drag;
+    if (
+      vy <= 0 &&
+      course.platforms.some((p, i) => {
+        const top = platformTop(p, i, { ...s, time: s.time + t });
+        return (
+          previousY >= top - 0.02 &&
+          y <= top &&
+          Math.abs(x - p.p[0]) < p.size[0] / 2 + 0.28 &&
+          Math.abs(z - p.p[2]) < p.size[2] / 2 + 0.28
+        );
+      })
+    )
+      return t;
+    previousY = y;
+  }
+  return 1.5;
+}
 export function stepRunner(
   s: RunnerState,
   input: Input,
@@ -267,11 +333,14 @@ export function stepRunner(
     'recovery',
     'wallCooldown',
     'rolling',
+    'crashTime',
     'maneuverCooldown',
     'momentum',
   ] as const)
     s[key] = Math.max(0, s[key] - dt);
   s.jumpBuffer = input.jump ? M.jumpBuffer : Math.max(0, s.jumpBuffer - dt);
+  s.flipBuffer = input.flip && s.crashTime <= 0 ? M.flipBuffer : Math.max(0, s.flipBuffer - dt);
+  if (s.rolling <= 0) s.rollUnderBeam = false;
   if (s.grounded) {
     s.coyote = M.coyote;
     s.wallTime = 0;
@@ -330,10 +399,17 @@ export function stepRunner(
       s.message = 'WALL KICK';
     }
   }
-  if (input.dive && s.maneuverCooldown <= 0 && !s.vault && (!s.diveUsed || s.grounded)) {
+  if (
+    input.dive &&
+    s.crashTime <= 0 &&
+    s.maneuverCooldown <= 0 &&
+    !s.vault &&
+    (!s.diveUsed || s.grounded)
+  ) {
     const vault = findVault(s, direction, course);
     s.maneuverCooldown = 0.6;
     s.flipStarted = false;
+    s.flipBuffer = 0;
     s.rolling = 0;
     s.drive = direction;
     s.driveSpeed = M.diveSpeed;
@@ -343,6 +419,10 @@ export function stepRunner(
       s.wallRunning = false;
       s.message = 'PULL VAULT';
     } else {
+      // Only the hand pull grants extra speed. An unsupported dive is a normal-speed
+      // forward launch followed by the crash penalty on contact with the floor.
+      const launchSpeed = Math.min(M.sprintSpeed, Math.max(M.runSpeed, Math.hypot(s.v[0], s.v[2])));
+      s.driveSpeed = launchSpeed;
       s.diving = true;
       s.diveUsed = true;
       s.v[1] = s.grounded || s.coyote > 0 ? M.diveLift : Math.max(s.v[1], 2.2);
@@ -350,8 +430,8 @@ export function stepRunner(
       s.coyote = 0;
       s.wallRunning = false;
       s.wallCooldown = 0.25;
-      s.v[0] = direction[0] * M.diveSpeed;
-      s.v[2] = direction[1] * M.diveSpeed;
+      s.v[0] = direction[0] * launchSpeed;
+      s.v[2] = direction[1] * launchSpeed;
       s.momentum = 0.5;
       s.message = 'DIVE';
     }
@@ -382,13 +462,19 @@ export function stepRunner(
       return;
     }
   }
-  if (input.roll && s.grounded && s.maneuverCooldown <= 0) {
+  if (input.roll && s.grounded && s.crashTime <= 0 && s.maneuverCooldown <= 0) {
     s.rolling = M.rollDuration;
     s.maneuverCooldown = 0.72;
+    s.rollUnderBeam = !!rollCanClearBeam(s, direction, course);
     s.drive = direction;
-    s.driveSpeed = Math.max(6, Math.hypot(s.v[0], s.v[2]));
-    s.momentum = M.rollDuration;
-    s.message = 'GROUND ROLL';
+    const speed = Math.hypot(s.v[0], s.v[2]);
+    s.driveSpeed = speed;
+    s.momentum = s.rollUnderBeam ? M.rollDuration : 0;
+    if (!s.rollUnderBeam && speed > M.walkSpeed) {
+      s.v[0] *= M.walkSpeed / speed;
+      s.v[2] *= M.walkSpeed / speed;
+    }
+    s.message = s.rollUnderBeam ? 'BEAM ROLL · KEEP YOUR SPEED' : 'ROLL · SPRINT PAUSED';
   }
   if (s.jumpBuffer > 0 && (s.coyote > 0 || s.wallRunning)) {
     s.v[1] = s.wallRunning ? 11.4 : M.jumpSpeed;
@@ -402,18 +488,18 @@ export function stepRunner(
     s.jumpBuffer = 0;
     s.wallRunning = false;
     s.rolling = 0;
+    s.rollUnderBeam = false;
     s.diving = false;
     s.momentum = 0;
   }
-  if (input.flip && !s.grounded && !s.flipStarted && !s.diving) {
-    s.flipStarted = true;
-    s.flipTime = 0;
-  }
-  if (s.flipStarted) s.flipTime += dt;
+  s.crouched =
+    input.crouch || s.rolling > 0 || s.crashTime > 0 || (s.crouched && lowCeiling(s, course));
   let speed: number = input.sprint ? M.sprintSpeed : M.runSpeed;
   if (s.boost > 0) speed *= 1.45;
   if (s.recovery > 0) speed *= 0.65;
-  if (input.crouch && s.grounded) speed *= input.sprint ? 1.04 : 0.55;
+  if (s.crashTime > 0) speed = M.crashSpeed;
+  else if ((s.rolling > 0 && !s.rollUnderBeam) || (s.crouched && s.rolling <= 0))
+    speed = M.walkSpeed;
   let targetX = dx * speed,
     targetZ = dz * speed;
   let acceleration = s.grounded ? 15 : 4.5;
@@ -422,6 +508,23 @@ export function stepRunner(
     targetZ = s.drive[1] * s.driveSpeed;
     acceleration = 7;
   }
+  if (
+    s.flipBuffer > 0 &&
+    !s.grounded &&
+    !s.flipStarted &&
+    !s.diving &&
+    !s.wallRunning &&
+    s.crashTime <= 0
+  ) {
+    s.flipStarted = true;
+    s.flipTime = 0;
+    s.flipBuffer = 0;
+    s.flipDuration = Math.max(
+      M.flipMinDuration,
+      Math.min(M.flipDuration, timeToLanding(s, course, targetX, targetZ) - M.flipLandingMargin),
+    );
+  }
+  if (s.flipStarted) s.flipTime += dt;
   if (s.wallRunning && wall) {
     const along = wall.axis === 0 ? 2 : 0;
     const sign = Math.sign((along === 2 ? dz : dx) || s.v[along]) || 1;
@@ -439,7 +542,7 @@ export function stepRunner(
   s.v[2] += (targetZ - s.v[2]) * Math.min(1, dt * acceleration);
   const previous = [...s.p];
   const next = s.p.map((value, i) => value + s.v[i] * dt) as Vec3;
-  const height = input.crouch || s.diving || s.rolling > 0 ? 0.8 : 1.8;
+  const height = s.crouched || s.diving ? 0.8 : 1.8;
   let grounded = false;
   for (let i = 0; i < course.platforms.length; i++) {
     const p = course.platforms[i],
@@ -479,21 +582,27 @@ export function stepRunner(
   }
   if (grounded && !s.grounded) {
     if (s.flipStarted) {
-      if (s.flipTime >= 0.65) {
+      if (s.flipTime + 1e-6 >= s.flipDuration) {
         s.boost = 1.15;
         s.message = 'CLEAN LANDING + BOOST';
       } else {
-        s.recovery = 0.6;
+        s.recovery = 0.35;
         s.message = 'SHORT FLIP · RECOVERING';
       }
     }
     s.flipStarted = false;
     s.flipTime = 0;
     if (s.diving) {
-      s.rolling = M.rollDuration;
-      s.momentum = M.rollDuration;
-      s.driveSpeed = Math.max(10, Math.min(16, Math.hypot(s.v[0], s.v[2])));
-      s.message = 'DIVE ROLL';
+      s.rolling = 0;
+      s.rollUnderBeam = false;
+      s.momentum = 0;
+      s.boost = 0;
+      s.flipBuffer = 0;
+      s.crashTime = M.crashDuration;
+      s.v[0] *= 0.18;
+      s.v[2] *= 0.18;
+      s.maneuverCooldown = Math.max(s.maneuverCooldown, M.crashDuration);
+      s.message = 'DIVE CRASH · MOMENTUM LOST';
     }
     s.diving = false;
     s.diveUsed = false;
@@ -503,13 +612,15 @@ export function stepRunner(
   if (grounded)
     pose(
       s,
-      s.rolling > 0
-        ? 'roll'
-        : input.crouch
-          ? 'slide'
-          : Math.hypot(s.v[0], s.v[2]) > 0.5
-            ? 'run'
-            : 'idle',
+      s.crashTime > 0
+        ? 'crash'
+        : s.rolling > 0
+          ? 'roll'
+          : s.crouched
+            ? 'slide'
+            : Math.hypot(s.v[0], s.v[2]) > 0.5
+              ? 'run'
+              : 'idle',
       dt,
     );
   else

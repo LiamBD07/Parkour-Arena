@@ -232,11 +232,14 @@ export function ControlsDialog({ onClose, settings }: { onClose: () => void; set
       settings.alwaysSprint ? 'Always sprint · no modifier needed' : 'Hold to sprint',
     ],
     [keyLabel(b.jump), 'Jump / push away from a wall'],
-    [keyLabel(b.slide), 'Hold to slide / crouch under low beams'],
+    [keyLabel(b.slide), 'Hold to crouch · slow movement'],
     ['AUTO', `Wall run · touch a grip wall in the air; ${keyLabel(b.jump)} pushes away`],
-    [keyLabel(b.dive), 'Dive forward · pull vault when a beam is in reach'],
-    [keyLabel(b.roll), 'Forward roll on the ground · jump cancels it'],
-    [keyLabel(b.flip), 'Air flip · complete the rotation for a landing boost'],
+    [keyLabel(b.dive), 'Pull vault over a low obstacle · a floor landing crashes and loses speed'],
+    [
+      keyLabel(b.roll),
+      'Tap once to roll · keep entry speed under a raised beam, walk speed in the open',
+    ],
+    [keyLabel(b.flip), 'Tap during a jump · rotation adjusts to the landing height'],
     [keyLabel(b.ability), 'Class ability'],
     [keyLabel(b.pause) + ' / ESC', 'Pause · change bindings from the pause menu'],
   ];
@@ -254,9 +257,11 @@ export function ControlsDialog({ onClose, settings }: { onClose: () => void; set
         ))}
       </div>
       <div className="tip-box">
-        <span>PRO TIP</span>Flip early in your jump. A completed flip boosts your landing; an
-        unfinished one costs a little momentum. The hinged orange roof drops shortly after you touch
-        it. Dive onto a low beam to plant your hands and pull yourself over it for a speed boost.
+        <span>PRO TIP</span>Roll just before an elevated beam to keep your running speed through the
+        opening. An open-ground roll pauses sprint until you stand up. Dive onto a low obstacle to
+        plant your hands and pull across for a boost; diving onto the floor costs momentum while you
+        get up. A complete flip boosts your landing, including on an obstacle. Flips fit the
+        remaining airtime, but starting just before contact still carries a brief recovery penalty.
         Wall running is automatic and slowly loses height.
       </div>
       <p className="fine-print">

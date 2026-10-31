@@ -28,6 +28,7 @@ export interface HudState {
   progress: number;
   grounded: boolean;
   pose: Pose;
+  phase: number;
   message: string;
   countdown: number;
   falls: number;
@@ -684,6 +685,7 @@ export class ArenaEngine {
           progress,
           grounded: s.grounded,
           pose: s.pose,
+          phase: motionPhase(s),
           message: now < this.messageUntil ? this.message : '',
           countdown,
           falls: s.falls,

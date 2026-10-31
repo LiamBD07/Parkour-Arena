@@ -73,6 +73,7 @@ const emptyHud: HudState = {
   progress: 0,
   grounded: true,
   pose: 'idle',
+  phase: 0,
   message: '',
   countdown: 3,
   falls: 0,
@@ -267,7 +268,12 @@ export function Race({
         <div className="countdown-overlay">
           <span>FIND YOUR LINE</span>
           <strong key={hud.countdown}>{hud.countdown}</strong>
-          <p>Click the course to look around · W to move · Shift to sprint</p>
+          <p>
+            Click the course to look around · {keyLabel(settings.bindings.forward)} to move ·{' '}
+            {settings.alwaysSprint
+              ? 'Sprint is automatic'
+              : `${keyLabel(settings.bindings.sprint)} to sprint`}
+          </p>
         </div>
       )}
       {!result && (
@@ -301,12 +307,13 @@ export function Race({
             <kbd>{keyLabel(settings.bindings.jump)}</kbd> JUMP{' '}
             <kbd>{keyLabel(settings.bindings.dive)}</kbd> DIVE / VAULT{' '}
             <kbd>{keyLabel(settings.bindings.roll)}</kbd> ROLL{' '}
-            <kbd>{keyLabel(settings.bindings.slide)}</kbd> SLIDE <span>WALL RUN: AUTO</span>{' '}
+            <kbd>{keyLabel(settings.bindings.slide)}</kbd> CROUCH <span>WALL RUN: AUTO</span>{' '}
             <kbd>{keyLabel(settings.bindings.pause)}</kbd> PAUSE
           </div>
           <div
             className="race-movement-state"
             data-pose={hud.pose}
+            data-phase={hud.phase.toFixed(3)}
             data-grounded={String(hud.grounded)}
           >
             {
@@ -315,11 +322,12 @@ export function Race({
                 run: 'RUNNING',
                 jump: 'IN THE AIR',
                 fall: 'FALLING',
-                slide: 'SLIDE',
+                slide: 'CROUCH',
                 dive: 'FORWARD DIVE',
+                crash: 'CRASH · GETTING UP',
                 roll: 'GROUND ROLL',
                 vault: 'PULL VAULT',
-                flip: 'AIR FLIP',
+                flip: hud.phase >= 1 ? 'FLIP COMPLETE' : `FLIP · ${Math.round(hud.phase * 100)}%`,
                 wallrun: 'WALL RUN',
               }[hud.pose]
             }
@@ -379,7 +387,7 @@ export function Race({
           <div className="touch-actions">
             {[
               ['ability', 'ABILITY'],
-              ['slide', 'SLIDE'],
+              ['slide', 'CROUCH'],
               ['jump', 'JUMP'],
               ['dive', 'DIVE'],
               ['roll', 'ROLL'],

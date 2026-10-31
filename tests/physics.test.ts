@@ -39,16 +39,17 @@ test('sprinting and a timed jump cross the first rooftop gap', () => {
   assert.equal(landed, true);
   assert.equal(state.falls, 0);
 });
-test('slide clears a low beam that stops a standing runner', () => {
+test('a single roll clears a low beam that stops a standing runner', () => {
   const standing = createRunner(course),
     sliding = createRunner(course);
   standing.p = [-5, 5, 42];
   sliding.p = [-5, 5, 42];
+  standing.v[2] = sliding.v[2] = 11.8;
   for (let i = 0; i < 150; i++) {
     stepRunner(standing, { ...input, forward: 1 }, course, 'runner', 1 / 120);
     stepRunner(
       sliding,
-      { ...input, forward: 1, crouch: true, sprint: true },
+      { ...input, forward: 1, roll: i === 0, sprint: true },
       course,
       'runner',
       1 / 120,
@@ -62,7 +63,7 @@ test('a completed flip boosts a landing; a late flip causes a brief recovery', (
     late = createRunner(course);
   for (let i = 0; i < 105; i++) {
     stepRunner(clean, { ...input, jump: i === 0, flip: i === 0 }, course, 'runner', 1 / 120);
-    stepRunner(late, { ...input, jump: i === 0, flip: i === 65 }, course, 'runner', 1 / 120);
+    stepRunner(late, { ...input, jump: i === 0, flip: i === 95 }, course, 'runner', 1 / 120);
   }
   assert.ok(clean.boost > 0);
   assert.equal(clean.recovery, 0);
@@ -124,7 +125,7 @@ test('every complete course is traversable without class abilities and produces 
     const state = createRunner(course);
     const roofs = course.platforms.filter((p) => !p.kind || p.kind === 'hinge');
     const frames: GhostFrame[] = [];
-    // A test driver only chooses ordinary controls: steer around boxes, duck under beams,
+    // A test driver only chooses ordinary controls: steer around boxes, tap roll under beams,
     // and jump shortly before each roof edge. It does not set positions or velocities.
     for (let tick = 0; tick < 3600 && !state.finished; tick++) {
       const z = state.p[2];
@@ -152,6 +153,12 @@ test('every complete course is traversable without class abilities and produces 
       if (box) targetX = box.p[0] + (next.p[0] < box.p[0] ? -1 : 1) * (box.size[0] / 2 + 1);
       const jump =
         state.grounded && z > roof.p[2] + roof.size[2] / 2 - 1.3 && index < roofs.length - 1;
+      const roll =
+        !!lowBeam &&
+        lowBeam.p[2] - z > 0 &&
+        lowBeam.p[2] - z < 5.8 &&
+        state.rolling <= 0 &&
+        state.maneuverCooldown <= 0;
       stepRunner(
         state,
         {
@@ -160,7 +167,7 @@ test('every complete course is traversable without class abilities and produces 
           right: -Math.max(-1, Math.min(1, (targetX - state.p[0]) * 0.7)),
           jump,
           sprint: true,
-          crouch: !!lowBeam,
+          roll,
         },
         course,
         'runner',

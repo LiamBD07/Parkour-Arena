@@ -30,26 +30,30 @@ The normal server startup runs the same repeatable database migrations before it
 
 Choose a course and a class, then start a solo time trial or queue for a four-runner open race. Practice works without signing in. Create an account to save runs online and receive 500 starter credits.
 
-| Control              | Action                                                                                            |
-| -------------------- | ------------------------------------------------------------------------------------------------- |
-| WASD / arrow keys    | Move relative to the view                                                                         |
-| Click course + mouse | Capture cursor and look                                                                           |
-| Automatic            | Sprint by default; turn off Always sprint in Settings to use Shift                                |
-| Space                | Jump (edge grace and input buffering included)                                                    |
-| C                    | Slide/crouch under low beams                                                                      |
-| Automatic            | Touch an amber grip wall while airborne to wall run; slowly descend, then detach after 1.8s       |
-| Space on a wall      | Push away into a wall jump                                                                        |
-| E                    | Launch into a forward dive; near a low beam, plant hands and pull vault across with a speed boost |
-| R                    | Tuck into a forward ground roll; Space immediately cancels into a jump                            |
-| F                    | Flip in the air: complete the rotation to earn a landing boost; land early for a brief recovery   |
-| Q                    | Class ability                                                                                     |
-| P / Escape           | Pause; the run timer continues                                                                    |
+| Control              | Action                                                                                        |
+| -------------------- | --------------------------------------------------------------------------------------------- |
+| WASD / arrow keys    | Move relative to the view                                                                     |
+| Click course + mouse | Capture cursor and look                                                                       |
+| Automatic            | Sprint by default; turn off Always sprint in Settings to use Shift                            |
+| Space                | Jump (edge grace and input buffering included)                                                |
+| C                    | Hold to crouch and walk slowly                                                                |
+| Automatic            | Touch an amber grip wall while airborne to wall run; slowly descend, then detach after 1.8s   |
+| Space on a wall      | Push away into a wall jump                                                                    |
+| E                    | Pull vault over a low obstacle for a boost; a dive onto the floor crashes and loses momentum  |
+| R                    | Tap for one ground roll: preserve speed under an elevated beam; walk speed in the open        |
+| F                    | Flip in the air: rotation adapts to the landing height; a full rotation earns a landing boost |
+| Q                    | Class ability                                                                                 |
+| P / Escape           | Pause; the run timer continues                                                                |
 
 Touch devices have a movement stick, a look area and action buttons. Keyboard and mouse are recommended for precise movement. WebGL 2 is required; select Performance quality in Settings on slower hardware.
 
 Every action can be rebound to a keyboard key or mouse button in **Settings → Keyboard & mouse**, also available from the pause menu. Choose an action, then press its new key; Escape cancels capture. Duplicate bindings swap so no action becomes inaccessible. Bindings persist in the current browser, apply immediately, and appear in the race HUD and movement manual. Click the course to capture the pointer before using mouse bindings.
 
-Dives launch forward even from standing and transition into a ground roll on landing. The same dive button starts a contextual pull vault when a reachable low obstacle has a clear landing roof beyond it; tall walls still block movement. Automatic wall running travels faster than sprinting, loses height steadily, and has a limited grip duration. Ground rolls visibly rotate the articulated body with tucked knees. Jump taps are queued until the next physics tick, with a 200ms landing buffer and 160ms grace after leaving an edge.
+Dives launch forward, but landing without a successful pull vault causes a floor crash, removes the speed boost and most momentum, and limits movement while the runner gets up. The dive button starts a contextual pull vault when a reachable low obstacle has a clear landing roof beyond it; tall walls still block movement.
+
+Roll is a single press and plays one tucked rotation. A correctly timed roll under a reachable elevated beam preserves entry speed without adding a boost. Rolling in the open disables sprint and immediately slows movement to walking until the animation ends; holding the key never repeats it. A standing runner is still blocked by a beam, and a runner whose roll ends beneath one stays crouched until there is room to stand. Manual crouch also uses walking speed.
+
+Flips take at most 0.5s and shorten to fit predicted contact with a roof or obstacle, down to 0.26s. The animation phase and landing check use the same duration. A flip press just before takeoff is buffered for 200ms, and completed flips hold an upright landing pose. Starting too late to finish still causes a short recovery penalty. Automatic wall running travels faster than sprinting, loses height steadily, and has a limited grip duration. Jump taps are queued until the next physics tick, with a 200ms landing buffer and 160ms grace after leaving an edge.
 
 The courses are **Skyline Circuit**, **The Foundry**, and **Harbor Run**, with different lateral layouts and environments. Follow the chevrons through four checkpoint gates. Falling restores the last checkpoint without resetting the clock. Orange hinged platforms start dropping after a short delay and reset for another attempt.
 

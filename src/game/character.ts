@@ -235,7 +235,14 @@ export function makeCharacter(color: string, ghost = false): Character {
         previousPose = value;
         beganPose = t;
       }
-      const duration = value === 'roll' ? MOVEMENT.rollDuration : value === 'flip' ? 0.72 : 0.6;
+      const duration =
+        value === 'roll'
+          ? MOVEMENT.rollDuration
+          : value === 'flip'
+            ? MOVEMENT.flipDuration
+            : value === 'crash'
+              ? MOVEMENT.crashDuration
+              : 0.6;
       const phase = state.phase ?? Math.min(1, Math.max(0, (t - beganPose) / duration));
       gait += dt * (1.2 + Math.min(18, speed) * 0.12) * Math.PI * 2;
       const movement = Math.min(1, speed / 5),
@@ -291,6 +298,22 @@ export function makeCharacter(color: string, ghost = false): Character {
           thighs[i].rotation.x = -0.03;
           knees[i].rotation.x = 0.3 + i * 0.2;
         }
+      }
+      if (value === 'crash') {
+        const k = Math.max(0, Math.min(1, (phase - 0.2) / 0.8));
+        const rise = k * k * (3 - 2 * k);
+        hips.position.y = 0.38 + rise * 0.56;
+        hips.rotation.x = 1.45 * (1 - rise);
+        spine.rotation.x = 0.1 + Math.sin(rise * Math.PI) * 0.55;
+        head.rotation.x = -0.25 * (1 - rise);
+        for (let i = 0; i < 2; i++) {
+          shoulders[i].rotation.set(-2.15 * (1 - rise), 0, i === 0 ? 0.2 : -0.2);
+          elbows[i].rotation.x = -0.75 * (1 - rise);
+          thighs[i].rotation.x = -(0.2 + i * 0.35) * (1 - rise);
+          knees[i].rotation.x = (0.75 + i * 0.4) * (1 - rise);
+          ankles[i].rotation.x = 0;
+        }
+        groundRoll();
       }
       if (value === 'roll' || value === 'flip') {
         const ground = value === 'roll';

@@ -5,7 +5,7 @@ export const ACTIONS = [
   ['right', 'Move right'],
   ['jump', 'Jump / wall jump'],
   ['dive', 'Dive / pull vault'],
-  ['slide', 'Slide / crouch'],
+  ['slide', 'Crouch (hold)'],
   ['roll', 'Ground roll'],
   ['ability', 'Class ability'],
   ['flip', 'Air flip'],
