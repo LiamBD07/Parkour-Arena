@@ -315,11 +315,16 @@ export function makeCharacter(color: string, ghost = false): Character {
         }
         groundRoll();
       }
-      if (value === 'roll' || isTrick(value)) {
-        const ground = value === 'roll';
-        const tuck = Math.min(1, phase / 0.14, (1 - phase) / 0.14);
+      if (value === 'roll' || value === 'roll-ready' || isTrick(value)) {
+        const preparing = value === 'roll-ready';
+        const ground = value === 'roll' || preparing;
+        const tuck = preparing
+          ? 1
+          : ground
+            ? Math.min(1, (1 - phase) / 0.14)
+            : Math.min(1, phase / 0.14, (1 - phase) / 0.14);
         hips.position.y = ground ? 0.94 - Math.max(0, tuck) * 0.37 : 1;
-        hips.rotation.x = Math.PI * 2 * phase;
+        hips.rotation.x = preparing ? 0 : Math.PI * 2 * phase;
         spine.rotation.x = 0.95 * Math.max(0, tuck);
         head.rotation.x = 0.7 * Math.max(0, tuck);
         for (let i = 0; i < 2; i++) {

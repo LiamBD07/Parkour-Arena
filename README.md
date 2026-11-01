@@ -30,21 +30,24 @@ The normal server startup runs the same repeatable database migrations before it
 
 Choose a course and a class, then start a solo time trial or queue for a four-runner open race. Practice works without signing in. Create an account to save runs online and receive 500 starter credits.
 
-| Control               | Action                                                |
-| --------------------- | ----------------------------------------------------- |
-| WASD / arrow keys     | Move relative to the view; running is automatic       |
-| Click course + mouse  | Capture cursor and look                               |
-| Space                 | Jump; next to a low roof-supported beam, dive over it |
-| Space again in midair | One random front flip, side flip, spin or corkscrew   |
-| Space on a wall       | Push away into a wall jump                            |
-| Shift                 | Tap once for a timed roll under an elevated beam      |
-| R                     | Restart the current run                               |
-| Q                     | Class ability                                         |
-| P / Escape            | Pause and open control settings                       |
+| Control               | Action                                              |
+| --------------------- | --------------------------------------------------- |
+| WASD / arrow keys     | Move relative to the view; running is automatic     |
+| Click course + mouse  | Capture cursor and look                             |
+| Space                 | Jump / push away from a wall                        |
+| E                     | Deliberate dive / pull vault over a low beam        |
+| Space again in midair | One random front flip, side flip, spin or corkscrew |
+| Space on a wall       | Push away into a wall jump                          |
+| Shift                 | Tap once for a timed roll under an elevated beam    |
+| R                     | Restart the current run                             |
+| Q                     | Class ability                                       |
+| P / Escape            | Pause and open control settings                     |
 
-Touch devices have a movement stick, a look area, and jump/trick, roll and ability buttons. Every keyboard action can be rebound in Settings or from the pause menu. Bindings persist in the browser. Existing default bindings migrate to Shift for roll and R for restart; custom controls are retained. WebGL 2 is required; select Performance quality on slower hardware.
+Touch devices have a movement stick, a look area, and jump/trick, dive, roll and ability buttons. Every keyboard action can be rebound in Settings or from the pause menu. Bindings persist in the browser. Existing default bindings migrate to Shift for roll and R for restart; custom controls are retained. WebGL 2 is required; select Performance quality on slower hardware.
 
-There are no separate dive, crouch or trick buttons. Space only starts a dive when a nearby low obstacle rests on the roof; elevated beams must be rolled under. Landing a dive on the far half of a low beam plants the hands and pulls the runner across for a speed boost. A landing before the midpoint or on the floor loses momentum. Roll plays one animation; its timing and incoming speed determine whether the runner clears an overhead beam. A mistimed roll cannot become an unlimited crouch.
+Space always jumps; tapping it again in midair performs a random trick. E is a deliberate dive on the ground or in the air. Landing at or beyond the first quarter of a low, roof-supported beam plants the hands and pulls the runner across at 18 m/s, followed by a sustained speed boost. A landing before the first quarter or on the floor loses momentum. Elevated beams do not grant a dive boost and must be rolled under. There are no separate crouch or trick buttons.
+
+Shift plays one timed roll. A press up to 250ms before landing is buffered, with a tucked preparation pose near contact so an immediate overhead beam does not cancel momentum. The roll starts on contact, keeps its full animation duration, and does not repeat from holding the key. Early presses expire; a mistimed roll cannot become an unlimited crouch.
 
 The four airborne tricks share a fixed 0.46-second duration and the same landing reward and penalty. The second jump press selects the trick without granting another jump or extra height. An early completed trick boosts the landing; a late one slows it. Wall jumps take priority while touching a grip wall. Jump presses survive render frames without a physics tick, with landing buffering and edge grace.
 

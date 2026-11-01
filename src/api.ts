@@ -60,7 +60,7 @@ export const defaultSettings: Settings = {
   sound: false,
   sensitivity: 1,
   quality: 'high',
-  controlsVersion: 2,
+  controlsVersion: 3,
   bindings: { ...DEFAULT_BINDINGS },
 };
 export function loadSettings(): Settings {
@@ -69,9 +69,9 @@ export function loadSettings(): Settings {
     sound: saved?.sound ?? defaultSettings.sound,
     sensitivity: saved?.sensitivity ?? 1,
     quality: saved?.quality ?? 'high',
-    controlsVersion: 2,
+    controlsVersion: 3,
     bindings:
-      saved?.controlsVersion === 2
+      (saved?.controlsVersion ?? 0) >= 2
         ? normalizeBindings(saved.bindings)
         : migrateBindings(saved?.bindings),
   };

@@ -228,10 +228,14 @@ export function ControlsDialog({ onClose, settings }: { onClose: () => void; set
     ],
     ['MOUSE', 'Look · click the course to capture cursor'],
     ['AUTO', 'Full-speed running · no modifier needed'],
-    [keyLabel(b.jump), 'Jump · beside a low beam, dive over it'],
+    [keyLabel(b.jump), 'Jump / push away from a wall'],
     [keyLabel(b.jump) + ' AGAIN', 'Tap again in midair for a random trick'],
+    [
+      keyLabel(b.dive),
+      'Dive deliberately · land past the first quarter of a low beam for a pull boost',
+    ],
     ['AUTO', `Wall run · jump onto a grip wall; ${keyLabel(b.jump)} pushes away`],
-    [keyLabel(b.roll), 'Tap once to roll under a raised beam · timing preserves speed'],
+    [keyLabel(b.roll), 'Tap to roll · a press just before landing is buffered'],
     [keyLabel(b.restart), 'Restart the run'],
     [keyLabel(b.ability), 'Class ability'],
     [keyLabel(b.pause) + ' / ESC', 'Pause · change bindings from the pause menu'],
@@ -250,12 +254,12 @@ export function ControlsDialog({ onClose, settings }: { onClose: () => void; set
         ))}
       </div>
       <div className="tip-box">
-        <span>PRO TIP</span>Use the amber walls to cross the wide building gaps. Space jumps, dives
-        over nearby low obstacles, or kicks away from a wall. Tap it again during an ordinary jump
-        for a random trick. Every trick takes the same time; starting late costs landing speed. Roll
-        under elevated beams with a well-timed tap. A low-beam dive that lands beyond its midpoint
-        plants the hands and pulls you across for a boost; a short landing or floor impact loses
-        momentum.
+        <span>PRO TIP</span>Use the amber walls to cross the wide gaps. Jump, then tap jump again in
+        the air for a random trick; late tricks cost landing speed. Use the separate dive action
+        when traversing a low beam. Landing at or beyond its first quarter plants the hands and
+        pulls you forward at boosted speed. A shorter landing or floor impact loses momentum. Roll
+        under raised beams with a well-timed tap; pressing up to a quarter-second before landing
+        queues the roll.
       </div>
       <p className="fine-print">
         On touch screens, use the left stick to move, drag the right side to look, and tap the

@@ -300,7 +300,8 @@ export function Race({
             </div>
           </div>
           <div className="race-controls-hint">
-            <kbd>{keyLabel(settings.bindings.jump)}</kbd> JUMP / VAULT · TAP AGAIN: TRICK{' '}
+            <kbd>{keyLabel(settings.bindings.jump)}</kbd> JUMP · TAP AGAIN: TRICK{' '}
+            <kbd>{keyLabel(settings.bindings.dive)}</kbd> DIVE / VAULT{' '}
             <kbd>{keyLabel(settings.bindings.roll)}</kbd> ROLL{' '}
             <kbd>{keyLabel(settings.bindings.restart)}</kbd> RESTART <span>WALL RUN: AUTO</span>{' '}
             <kbd>{keyLabel(settings.bindings.pause)}</kbd> PAUSE
@@ -324,6 +325,7 @@ export function Race({
                   dive: 'FORWARD DIVE',
                   crash: 'CRASH · GETTING UP',
                   roll: 'GROUND ROLL',
+                  'roll-ready': 'ROLL QUEUED',
                   vault: 'PULL VAULT',
                   wallrun: 'WALL RUN',
                 }[hud.pose]}
@@ -384,6 +386,7 @@ export function Race({
             {[
               ['ability', 'ABILITY'],
               ['jump', 'JUMP / TRICK'],
+              ['dive', 'DIVE'],
               ['roll', 'ROLL'],
             ].map(([key, label]) => (
               <button

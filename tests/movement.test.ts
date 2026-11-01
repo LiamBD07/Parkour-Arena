@@ -3,7 +3,13 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { COURSES, type Course } from '../shared/game.js';
 import { MOVEMENT as M, TRICKS } from '../shared/movement.js';
-import { createRunner, stepRunner, motionPhase, type Input } from '../shared/physics.js';
+import {
+  createRunner,
+  stepRunner,
+  motionPhase,
+  beamProgress,
+  type Input,
+} from '../shared/physics.js';
 import {
   ACTIONS,
   DEFAULT_BINDINGS,
@@ -14,7 +20,15 @@ import {
   migrateBindings,
 } from '../src/game/controls.js';
 import { makeCharacter } from '../src/game/character.js';
-const idle: Input = { forward: 0, right: 0, jump: false, roll: false, ability: false, yaw: 0 };
+const idle: Input = {
+  forward: 0,
+  right: 0,
+  jump: false,
+  dive: false,
+  roll: false,
+  ability: false,
+  yaw: 0,
+};
 const flat: Course = {
   ...COURSES[0],
   start: [0, 0, 0],
@@ -99,20 +113,35 @@ const beamCourse: Course = {
   ...flat,
   platforms: [...flat.platforms, { p: [0, 0.6, 5], size: [6, 1.2, 2], kind: 'obstacle' }],
 };
-test('Space beside a roof-supported beam dives onto its far half, plants hands, and boosts across', () => {
+test('Space beside a low beam jumps, and a second Space performs a trick instead of diving', () => {
+  const s = createRunner(beamCourse);
+  s.p[2] = 1.5;
+  stepRunner(s, { ...idle, forward: 1, jump: true }, beamCourse, 'runner', M.step);
+  assert.equal(s.pose, 'jump');
+  assert.equal(s.diving, false);
+  advance(s, beamCourse, { ...idle, forward: 1 }, 0.15);
+  stepRunner(s, { ...idle, forward: 1, jump: true }, beamCourse, 'runner', M.step, () => 0.6);
+  assert.equal(s.pose, 'spin');
+  assert.equal(s.diving, false);
+});
+test('E beside a roof-supported beam plants hands and pulls faster than running throughout the vault', () => {
   const s = createRunner(beamCourse);
   s.p[2] = 1.5;
   s.v[2] = M.runSpeed;
-  stepRunner(s, { ...idle, forward: 1, jump: true }, beamCourse, 'runner', M.step);
+  stepRunner(s, { ...idle, forward: 1, dive: true }, beamCourse, 'runner', M.step);
   assert.equal(s.pose, 'dive');
   let planted = false,
     boosted = false;
   for (let i = 0; i < 150; i++) {
+    const previousVault = s.vault;
+    const previousZ = s.p[2];
     stepRunner(s, { ...idle, forward: 1 }, beamCourse, 'runner', M.step);
     if (s.vault) {
       planted = true;
       assert.ok(s.vault.start[2] >= 5);
       assert.equal(s.crashTime, 0);
+      assert.ok(Math.abs(s.v[2] - M.vaultSpeed) < 1e-6);
+      if (previousVault) assert.ok(Math.abs((s.p[2] - previousZ) / M.step - M.vaultSpeed) < 1e-6);
     }
     if (s.boost > 0) boosted = true;
   }
@@ -122,10 +151,10 @@ test('Space beside a roof-supported beam dives onto its far half, plants hands, 
   assert.ok(s.v[2] > M.runSpeed);
   assert.equal(s.crashTime, 0);
 });
-test('Space alone beside a beam completes the dive and pull without holding a movement key', () => {
+test('E alone beside a beam completes the dive and pull without holding a movement key', () => {
   const s = createRunner(beamCourse);
   s.p[2] = 1.5;
-  stepRunner(s, { ...idle, jump: true }, beamCourse, 'runner', M.step);
+  stepRunner(s, { ...idle, dive: true }, beamCourse, 'runner', M.step);
   let pulled = false;
   for (let i = 0; i < 120; i++) {
     stepRunner(s, idle, beamCourse, 'runner', M.step);
@@ -135,15 +164,91 @@ test('Space alone beside a beam completes the dive and pull without holding a mo
   assert.equal(s.crashTime, 0);
   assert.ok(s.p[2] > 7);
 });
-test('landing a beam dive before its midpoint loses momentum', () => {
+test('an airborne E dive reaches the beam, pulls, and keeps a sustained speed boost after landing', () => {
   const s = createRunner(beamCourse);
-  s.p[2] = 0.5;
   s.v[2] = M.runSpeed;
   stepRunner(s, { ...idle, forward: 1, jump: true }, beamCourse, 'runner', M.step);
+  advance(s, beamCourse, { ...idle, forward: 1 }, 0.25);
+  const vy = s.v[1];
+  stepRunner(s, { ...idle, forward: 1, dive: true }, beamCourse, 'runner', M.step);
+  assert.equal(s.diving, true);
+  assert.ok(s.v[1] < vy);
+  let pulled = false;
+  for (let i = 0; i < 120; i++) {
+    stepRunner(s, { ...idle, forward: 1 }, beamCourse, 'runner', M.step);
+    if (s.vault) pulled = true;
+    if (pulled && !s.vault) break;
+  }
+  assert.ok(pulled && s.grounded);
+  assert.ok(s.v[2] >= M.vaultSpeed);
+  advance(s, beamCourse, { ...idle, forward: 1 }, 0.55);
+  assert.ok(s.boost > 0);
+  assert.ok(s.v[2] > M.runSpeed * 1.4);
+  assert.equal(s.crashTime, 0);
+});
+test('landing between the first quarter and midpoint grants the hand pull and boost', () => {
+  const s = createRunner(beamCourse);
+  s.p[2] = 1.5;
+  s.v[2] = M.runSpeed;
+  stepRunner(s, { ...idle, forward: 1, dive: true }, beamCourse, 'runner', M.step);
+  for (let i = 0; i < 120 && !s.vault && !s.crashTime; i++)
+    stepRunner(s, { ...idle, forward: i >= 24 ? -1 : 1 }, beamCourse, 'runner', M.step);
+  assert.ok(s.vault);
+  const progress = beamProgress(s.vault.start, s.drive, beamCourse.platforms[1]);
+  assert.ok(progress >= 0.25 && progress < 0.5);
+  assert.ok(s.boost > 0);
+  assert.equal(s.v[2], M.vaultSpeed);
+  assert.equal(s.crashTime, 0);
+});
+test('the first-quarter cutoff follows forward, backward, sideways and diagonal approaches', () => {
+  const beam = beamCourse.platforms[1];
+  for (const [point, direction] of [
+    [
+      [0, 1.2, 4.5],
+      [0, 1],
+    ],
+    [
+      [0, 1.2, 5.5],
+      [0, -1],
+    ],
+    [
+      [-1.5, 1.2, 5],
+      [1, 0],
+    ],
+    [
+      [1.5, 1.2, 5],
+      [-1, 0],
+    ],
+    [
+      [-0.5, 1.2, 4.5],
+      [Math.SQRT1_2, Math.SQRT1_2],
+    ],
+  ] as const)
+    assert.ok(Math.abs(beamProgress([...point], [...direction], beam) - 0.25) < 1e-8);
+});
+test('a dive landing exactly one quarter across gets the boost; just before it gets a penalty', () => {
+  for (const landingZ of [4.499, 4.5, 4.501]) {
+    const s = createRunner(beamCourse);
+    s.p = [0, 1.20001, landingZ - M.runSpeed * M.step];
+    s.v = [0, -4, M.runSpeed];
+    s.grounded = false;
+    s.coyote = 0;
+    stepRunner(s, { ...idle, forward: 1, dive: true }, beamCourse, 'runner', M.step);
+    assert.ok(Math.abs(s.p[2] - landingZ) < 1e-6);
+    assert.equal(!!s.vault, landingZ >= 4.5);
+    assert.equal(s.boost > 0, landingZ >= 4.5);
+    assert.equal(s.crashTime > 0, landingZ < 4.5);
+  }
+});
+test('landing a beam dive before its first quarter loses momentum', () => {
+  const s = createRunner(beamCourse);
+  s.p[2] = 1.5;
+  s.v[2] = M.runSpeed;
+  stepRunner(s, { ...idle, forward: 1, dive: true }, beamCourse, 'runner', M.step);
   for (let i = 0; i < 150 && !s.crashTime; i++)
     stepRunner(s, { ...idle, forward: -1 }, beamCourse, 'runner', M.step);
   assert.ok(s.crashTime > 0);
-  assert.ok(s.p[2] < 5);
+  assert.ok(s.p[2] < 4.5);
   assert.equal(s.p[1], 1.2);
   assert.equal(s.vault, null);
   assert.equal(s.boost, 0);
@@ -156,7 +261,7 @@ test('a dive that misses a thin beam and hits the floor crashes', () => {
   const s = createRunner(course);
   s.p[2] = 0.5;
   s.v[2] = M.runSpeed;
-  stepRunner(s, { ...idle, forward: 1, jump: true }, course, 'runner', M.step);
+  stepRunner(s, { ...idle, forward: 1, dive: true }, course, 'runner', M.step);
   for (let i = 0; i < 180 && !s.crashTime; i++)
     stepRunner(s, { ...idle, right: 1 }, course, 'runner', M.step);
   assert.ok(s.crashTime > 0);
@@ -168,14 +273,98 @@ const elevated: Course = {
   ...flat,
   platforms: [flat.platforms[0], { p: [0, 2.1, 5], size: [12, 0.7, 2.6], kind: 'obstacle' }],
 };
-test('an elevated beam can never trigger a Space dive or pull vault', () => {
-  const s = createRunner(elevated);
-  s.p[2] = 1.5;
+test('an elevated beam can never be an E dive target or grant a pull boost, even from above', () => {
+  for (const height of [0, 3.5]) {
+    const s = createRunner(elevated);
+    s.p = [0, height, 1.5];
+    s.grounded = height === 0;
+    s.coyote = height === 0 ? M.coyote : 0;
+    s.v[2] = M.runSpeed;
+    stepRunner(s, { ...idle, forward: 1, dive: true }, elevated, 'runner', M.step);
+    assert.equal(s.diveObstacle, null);
+    for (let i = 0; i < 180 && !s.crashTime; i++) {
+      stepRunner(s, { ...idle, forward: 1 }, elevated, 'runner', M.step);
+      assert.equal(s.vault, null);
+      assert.equal(s.boost, 0);
+    }
+    assert.ok(s.crashTime > 0);
+    assert.equal(s.vault, null);
+  }
+});
+test('E in the open crashes on the floor and repeated E cannot add lift', () => {
+  const s = createRunner(flat);
+  stepRunner(s, { ...idle, forward: 1, dive: true }, flat, 'runner', M.step);
+  const vy = s.v[1];
+  stepRunner(s, { ...idle, forward: 1, dive: true }, flat, 'runner', M.step);
+  assert.ok(s.v[1] < vy);
+  for (let i = 0; i < 120 && !s.crashTime; i++)
+    stepRunner(s, { ...idle, forward: 1 }, flat, 'runner', M.step);
+  assert.ok(s.crashTime > 0);
+  assert.ok(s.v[2] < M.walkSpeed);
+  assert.equal(s.boost, 0);
+});
+const landingBeam: Course = {
+  ...flat,
+  platforms: [flat.platforms[0], { p: [0, 2.1, 11.2], size: [12, 0.7, 2.6], kind: 'obstacle' }],
+};
+for (const pressAt of [0.66, 0.75, 0.8])
+  test(`Shift pressed at ${pressAt}s into a jump starts a full roll on landing under the beam`, () => {
+    const s = createRunner(landingBeam);
+    s.v[2] = M.runSpeed;
+    stepRunner(s, { ...idle, forward: 1, jump: true }, landingBeam, 'runner', M.step);
+    let prepared = false,
+      landed = false;
+    for (let i = 1; i <= 150; i++) {
+      const wasGrounded = s.grounded;
+      stepRunner(
+        s,
+        { ...idle, forward: 1, roll: i === Math.round(pressAt / M.step) },
+        landingBeam,
+        'runner',
+        M.step,
+      );
+      if (!s.grounded) {
+        assert.equal(s.rolling, 0, 'the roll duration must not be spent in the air');
+        if (s.rollReady) {
+          prepared = true;
+          assert.equal(s.pose, 'roll-ready');
+        }
+      } else if (!wasGrounded) {
+        landed = true;
+        assert.equal(s.pose, 'roll');
+        assert.equal(s.rolling, M.rollDuration);
+        assert.equal(s.rollBuffer, 0);
+        assert.ok(s.rollUnderBeam);
+      }
+      assert.ok(Math.abs(s.v[2] - M.runSpeed) < 1e-6, 'no collision or roll speed loss');
+    }
+    assert.ok(prepared && landed);
+    assert.ok(s.p[2] > 12.8, 'the runner passes the beam at entry speed');
+  });
+test('Shift pressed too early expires instead of rolling later without another press', () => {
+  const s = createRunner(flat);
+  stepRunner(s, { ...idle, forward: 1, jump: true }, flat, 'runner', M.step);
+  for (let i = 1; i <= 150; i++) {
+    stepRunner(s, { ...idle, forward: 1, roll: i === 36 }, flat, 'runner', M.step);
+    assert.equal(s.rolling, 0);
+    assert.equal(s.rollReady, false);
+  }
+  assert.equal(s.rollBuffer, 0);
+  assert.ok(s.grounded);
+});
+test('a queued landing roll retains the penalty from a late trick', () => {
+  const s = createRunner(landingBeam);
   s.v[2] = M.runSpeed;
-  stepRunner(s, { ...idle, forward: 1, jump: true }, elevated, 'runner', M.step);
-  assert.equal(s.diving, false);
-  assert.equal(s.vault, null);
-  assert.equal(s.pose, 'jump');
+  stepRunner(s, { ...idle, forward: 1, jump: true }, landingBeam, 'runner', M.step);
+  advance(s, landingBeam, { ...idle, forward: 1 }, 0.7);
+  stepRunner(s, { ...idle, forward: 1, jump: true, roll: true }, landingBeam, 'runner', M.step);
+  for (let i = 0; i < 60 && !s.grounded; i++)
+    stepRunner(s, { ...idle, forward: 1 }, landingBeam, 'runner', M.step);
+  assert.ok(s.grounded);
+  assert.equal(s.pose, 'roll');
+  assert.ok(s.recovery > 0);
+  assert.ok(s.v[2] < M.runSpeed * 0.75);
+  assert.equal(s.boost, 0);
 });
 test('a random roll slows to walking and cannot propel a standing runner', () => {
   const s = createRunner(flat);
@@ -306,14 +495,18 @@ test('Space on a wall kicks away instead of selecting a trick or instantly regra
   assert.ok(s.v[1] > 10);
   assert.ok(s.wallCooldown > 0);
 });
-test('only jump, roll, ability, restart and movement/pause bindings remain', () => {
+test('jump, deliberate dive, roll and restart have distinct default controls', () => {
   assert.equal(DEFAULT_BINDINGS.jump, 'Space');
+  assert.equal(DEFAULT_BINDINGS.dive, 'KeyE');
   assert.equal(DEFAULT_BINDINGS.roll, 'ShiftLeft');
   assert.equal(DEFAULT_BINDINGS.restart, 'KeyR');
-  for (const key of ['dive', 'slide', 'flip', 'sprint'])
-    assert.ok(!ACTIONS.some(([a]) => a === key));
+  for (const key of ['slide', 'flip', 'sprint']) assert.ok(!ACTIONS.some(([a]) => a === key));
   const c = new RunnerControls();
-  for (const key of ['KeyE', 'KeyC', 'KeyF']) assert.equal(c.down(key, 0), undefined);
+  for (const key of ['KeyC', 'KeyF']) assert.equal(c.down(key, 0), undefined);
+  assert.equal(c.down('KeyE', 0), 'dive');
+  c.up('KeyE');
+  assert.equal(c.consume(600, 0).dive, true);
+  assert.equal(c.consume(610, 0).dive, false);
   assert.equal(c.actionFor('ShiftRight'), 'roll');
   assert.equal(c.actionFor('KeyR'), 'restart');
 });
@@ -329,15 +522,24 @@ test('old default controls migrate while custom keyboard and mouse choices survi
   const b = migrateBindings(old);
   assert.equal(b.roll, 'ShiftLeft');
   assert.equal(b.restart, 'KeyR');
-  assert.equal('dive' in b, false);
-  const custom = migrateBindings({ ...old, jump: 'KeyG', roll: 'Mouse2' });
+  assert.equal(b.dive, 'KeyE');
+  const custom = migrateBindings({ ...old, jump: 'KeyG', roll: 'Mouse2', dive: 'KeyV' });
   assert.equal(custom.jump, 'KeyG');
   assert.equal(custom.roll, 'Mouse2');
+  assert.equal(custom.dive, 'KeyV');
   const c = new RunnerControls(normalizeBindings(JSON.parse(JSON.stringify(custom))));
   c.down('Mouse2', 0);
   c.up('Mouse2');
   assert.equal(c.consume(600, 0).roll, true);
   assert.equal(c.consume(610, 0).roll, false);
+});
+test('saved controls from the Space-vault version gain E without resetting custom bindings', () => {
+  const { dive, ...previous } = { ...DEFAULT_BINDINGS, jump: 'Mouse2' };
+  const b = normalizeBindings(previous);
+  assert.equal(b.dive, 'KeyE');
+  assert.equal(b.jump, 'Mouse2');
+  assert.equal(b.roll, 'ShiftLeft');
+  assert.equal(b.restart, 'KeyR');
 });
 test('conflicting bindings swap and arrow aliases cannot trigger a rebound action twice', () => {
   const b = rebind({ ...DEFAULT_BINDINGS }, 'jump', 'ShiftLeft');
@@ -375,6 +577,15 @@ test('the entire ground roll stays on the roof without sinking the head or limbs
     const bounds = new THREE.Box3().setFromObject(c.group);
     assert.ok(bounds.min.y >= 0.02 && bounds.min.y < 0.035, `floor contact at phase ${i / 20}`);
   }
+});
+test('the queued roll pose tucks before landing without starting the somersault', () => {
+  const c = makeCharacter('#c7ef5c');
+  c.animate(0, 12, 'roll-ready', { phase: 0 });
+  const bounds = new THREE.Box3().setFromObject(c.group);
+  assert.ok(bounds.min.y >= 0.02);
+  assert.ok(bounds.max.y + M.rollPrepHeight < 1.75, 'fits under the beam while preparing to land');
+  assert.equal(c.group.getObjectByName('hips')!.rotation.x, 0);
+  assert.ok(c.group.getObjectByName('leftKnee')!.rotation.x > 2);
 });
 test('a floor crash lies forward, then visibly gets up without sinking through the roof', () => {
   const c = makeCharacter('#c7ef5c');

@@ -5,6 +5,7 @@ export interface Input {
   forward: number;
   right: number;
   jump: boolean;
+  dive: boolean;
   roll: boolean;
   ability: boolean;
   yaw: number;
@@ -46,6 +47,8 @@ export interface RunnerState {
   message: string;
   poseTime: number;
   rolling: number;
+  rollBuffer: number;
+  rollReady: boolean;
   rollUnderBeam: boolean;
   crashTime: number;
   diving: boolean;
@@ -86,6 +89,8 @@ export function createRunner(course: Course): RunnerState {
     message: '',
     poseTime: 0,
     rolling: 0,
+    rollBuffer: 0,
+    rollReady: false,
     rollUnderBeam: false,
     crashTime: 0,
     diving: false,
@@ -144,15 +149,21 @@ function advanceCourse(s: RunnerState, course: Course) {
     s.message = 'BACK ON YOUR FEET';
   }
 }
-function horizontalRay(p: Vec3, direction: [number, number], box: Platform) {
+function horizontalRay(
+  p: Vec3,
+  direction: [number, number],
+  box: Platform,
+  padding = 0.22,
+  allowPast = false,
+) {
   let entry = -Infinity,
     exit = Infinity;
   for (const [axis, d] of [
     [0, direction[0]],
     [2, direction[1]],
   ] as const) {
-    const lo = box.p[axis] - box.size[axis] / 2 - 0.22,
-      hi = box.p[axis] + box.size[axis] / 2 + 0.22;
+    const lo = box.p[axis] - box.size[axis] / 2 - padding,
+      hi = box.p[axis] + box.size[axis] / 2 + padding;
     if (Math.abs(d) < 1e-5) {
       if (p[axis] < lo || p[axis] > hi) return null;
     } else {
@@ -162,7 +173,7 @@ function horizontalRay(p: Vec3, direction: [number, number], box: Platform) {
       exit = Math.min(exit, Math.max(a, b));
     }
   }
-  return exit >= Math.max(0, entry) ? { entry, exit } : null;
+  return exit >= entry && (allowPast || exit >= Math.max(0, entry)) ? { entry, exit } : null;
 }
 function underBeam(s: RunnerState, course: Course) {
   return course.platforms.find((p, i) => {
@@ -194,70 +205,136 @@ function rollCanClearBeam(s: RunnerState, direction: [number, number], course: C
     })
   );
 }
-/** Only roof-supported, low obstacles qualify. Raised beams must be rolled under. */
+function floorAt(s: RunnerState, course: Course, point: Vec3): number | undefined {
+  let floor: number | undefined;
+  for (let i = 0; i < course.platforms.length; i++) {
+    const p = course.platforms[i],
+      top = platformTop(p, i, s);
+    if (p.kind === 'wall' || p.kind === 'obstacle' || top > s.p[1] + 0.15) continue;
+    if (
+      Math.abs(point[0] - p.p[0]) < p.size[0] / 2 + 0.28 &&
+      Math.abs(point[2] - p.p[2]) < p.size[2] / 2 + 0.28
+    )
+      floor = floor === undefined ? top : Math.max(floor, top);
+  }
+  return floor;
+}
+/** The roof beneath the beam determines eligibility, even when the runner is airborne. */
 function diveTarget(s: RunnerState, direction: [number, number], course: Course) {
   return course.platforms
-    .map((p, i) => ({ p, i, ray: horizontalRay(s.p, direction, p) }))
+    .map((p, i) => ({
+      p,
+      i,
+      ray: horizontalRay(s.p, direction, p),
+      floor: floorAt(s, course, p.p),
+    }))
     .filter(
-      ({ p, i, ray }) =>
+      ({ p, i, ray, floor }) =>
         p.kind === 'obstacle' &&
         ray &&
-        ray.entry >= -0.25 &&
+        ray.exit > 0 &&
         ray.entry <= M.vaultReach &&
-        platformTop(p, i, s) - p.size[1] <= s.p[1] + 0.25 &&
-        platformTop(p, i, s) - s.p[1] >= 0.4 &&
-        platformTop(p, i, s) - s.p[1] <= 1.65,
+        floor !== undefined &&
+        platformTop(p, i, s) - p.size[1] <= floor + 0.25 &&
+        platformTop(p, i, s) - floor >= 0.4 &&
+        platformTop(p, i, s) - floor <= 1.65,
     )
-    .sort((a, b) => a.ray!.entry - b.ray!.entry)[0];
+    .sort((a, b) => Math.max(0, a.ray!.entry) - Math.max(0, b.ray!.entry))[0];
+}
+export function beamProgress(point: Vec3, direction: [number, number], beam: Platform) {
+  const ray = horizontalRay(point, direction, beam, 0, true);
+  if (ray && ray.exit - ray.entry > 1e-6) return -ray.entry / (ray.exit - ray.entry);
+  const axis = Math.abs(direction[0]) > Math.abs(direction[1]) ? 0 : 2;
+  const sign = Math.sign(direction[axis === 0 ? 0 : 1]) || 1;
+  return ((point[axis] - beam.p[axis]) * sign + beam.size[axis] / 2) / beam.size[axis];
 }
 function pullOverBeam(s: RunnerState, course: Course, index: number): VaultMotion | null {
   const beam = course.platforms[index],
     ray = horizontalRay(s.p, s.drive, beam);
   if (!ray) return null;
   const top = platformTop(beam, index, s);
-  const end: Vec3 = [
-    s.p[0] + s.drive[0] * (ray.exit + 1.1),
-    s.diveFloor,
-    s.p[2] + s.drive[1] * (ray.exit + 1.1),
-  ];
-  const roof = course.platforms.find(
-    (p, i) =>
-      p.kind !== 'wall' &&
-      p.kind !== 'obstacle' &&
-      Math.abs(end[0] - p.p[0]) < p.size[0] / 2 - 0.28 &&
-      Math.abs(end[2] - p.p[2]) < p.size[2] / 2 - 0.28 &&
-      Math.abs(platformTop(p, i, s) - s.diveFloor) < 1.3,
-  );
-  if (!roof) return null;
-  end[1] = platformTop(roof, course.platforms.indexOf(roof), s);
-  const across: Vec3 = [
-    s.p[0] + s.drive[0] * (ray.exit + 0.15),
-    top + 0.18,
-    s.p[2] + s.drive[1] * (ray.exit + 0.15),
-  ];
-  const distance = Math.hypot(end[0] - s.p[0], end[2] - s.p[2]);
-  return {
-    start: [...s.p],
-    across,
-    end,
-    contact: [s.p[0], top + 0.04, s.p[2]],
-    time: 0,
-    duration: Math.max(0.24, distance / M.vaultSpeed),
-    obstacle: index,
-  };
+  for (const clearance of [2, 1.1]) {
+    const end: Vec3 = [
+      s.p[0] + s.drive[0] * (ray.exit + clearance),
+      s.diveFloor,
+      s.p[2] + s.drive[1] * (ray.exit + clearance),
+    ];
+    const roof = course.platforms.find(
+      (p, i) =>
+        p.kind !== 'wall' &&
+        p.kind !== 'obstacle' &&
+        Math.abs(end[0] - p.p[0]) < p.size[0] / 2 - 0.28 &&
+        Math.abs(end[2] - p.p[2]) < p.size[2] / 2 - 0.28 &&
+        Math.abs(platformTop(p, i, s) - s.diveFloor) < 1.3,
+    );
+    if (!roof) continue;
+    end[1] = platformTop(roof, course.platforms.indexOf(roof), s);
+    const across: Vec3 = [
+      s.p[0] + s.drive[0] * (ray.exit + 0.15),
+      top + 0.18,
+      s.p[2] + s.drive[1] * (ray.exit + 0.15),
+    ];
+    const distance = Math.hypot(end[0] - s.p[0], end[2] - s.p[2]);
+    return {
+      start: [...s.p],
+      across,
+      end,
+      contact: [s.p[0], top + 0.04, s.p[2]],
+      time: 0,
+      duration: distance / M.vaultSpeed,
+      obstacle: index,
+    };
+  }
+  return null;
 }
 export function sampleVault(v: VaultMotion, u: number): Vec3 {
-  const from = u < 0.6 ? v.start : v.across,
-    to = u < 0.6 ? v.across : v.end;
-  const k = Math.max(0, Math.min(1, u < 0.6 ? u / 0.6 : (u - 0.6) / 0.4));
-  const point = from.map((n, i) => n + (to[i] - n) * k) as Vec3;
-  if (u < 0.6) point[1] = v.start[1] + Math.sin((k * Math.PI) / 2) * 0.18;
+  const phase = Math.max(0, Math.min(1, u));
+  const point = v.start.map((n, i) => n + (v.end[i] - n) * phase) as Vec3;
+  const distance = Math.hypot(v.end[0] - v.start[0], v.end[2] - v.start[2]);
+  const lip = Math.hypot(v.across[0] - v.start[0], v.across[2] - v.start[2]) / distance;
+  if (phase <= lip)
+    point[1] = v.start[1] + Math.sin(((phase / Math.max(0.01, lip)) * Math.PI) / 2) * 0.18;
+  else point[1] = v.across[1] + ((v.end[1] - v.across[1]) * (phase - lip)) / (1 - lip);
   return point;
+}
+function startPull(s: RunnerState, pull: VaultMotion) {
+  s.vault = pull;
+  s.diving = false;
+  s.diveObstacle = null;
+  s.grounded = false;
+  s.trickActive = false;
+  s.rollReady = false;
+  s.recovery = 0;
+  s.boost = Math.max(s.boost, M.vaultBoostDuration);
+  s.driveSpeed = M.vaultSpeed;
+  s.v[0] = s.drive[0] * M.vaultSpeed;
+  s.v[2] = s.drive[1] * M.vaultSpeed;
+  s.message = 'HAND PULL · SPEED BOOST';
+}
+function startRoll(s: RunnerState, direction: [number, number], course: Course) {
+  if (s.rollBuffer <= 0 || !s.grounded || s.rolling > 0 || s.crashTime > 0 || s.diving || s.vault)
+    return false;
+  s.rollBuffer = 0;
+  s.rollReady = false;
+  s.rolling = M.rollDuration;
+  s.maneuverCooldown = 0.72;
+  s.rollUnderBeam = !!rollCanClearBeam(s, direction, course);
+  s.drive = direction;
+  s.driveSpeed = Math.hypot(s.v[0], s.v[2]);
+  s.momentum = s.rollUnderBeam ? M.rollDuration : 0;
+  if (!s.rollUnderBeam && s.driveSpeed > M.walkSpeed) {
+    s.v[0] *= M.walkSpeed / s.driveSpeed;
+    s.v[2] *= M.walkSpeed / s.driveSpeed;
+  }
+  s.message = s.rollUnderBeam ? 'BEAM ROLL · KEEP YOUR SPEED' : 'ROLL · SPRINT PAUSED';
+  return true;
 }
 function crash(s: RunnerState, message: string) {
   s.diving = false;
   s.diveObstacle = null;
   s.rolling = 0;
+  s.rollBuffer = 0;
+  s.rollReady = false;
   s.rollUnderBeam = false;
   s.momentum = 0;
   s.boost = 0;
@@ -286,12 +363,15 @@ export function stepRunner(
     'recovery',
     'wallCooldown',
     'rolling',
+    'rollBuffer',
     'crashTime',
     'maneuverCooldown',
     'momentum',
   ] as const)
     s[key] = Math.max(0, s[key] - dt);
   s.jumpBuffer = Math.max(0, s.jumpBuffer - dt);
+  s.rollReady = false;
+  if (input.roll && s.crashTime <= 0) s.rollBuffer = M.rollBuffer;
   if (s.rolling <= 0) {
     s.rollUnderBeam = false;
     // A mistimed roll cannot turn into an unlimited crouch under the obstacle.
@@ -312,6 +392,7 @@ export function stepRunner(
     s.wallRise = 0;
     s.airJumped = false;
     s.trickUsed = false;
+    s.diveFloor = floorAt(s, course, s.p) ?? s.diveFloor;
   } else s.coyote = Math.max(0, s.coyote - dt);
   const length = Math.hypot(input.forward, input.right) || 1;
   const forward = input.forward / length,
@@ -372,6 +453,48 @@ export function stepRunner(
       s.message = 'WALL KICK';
     }
   }
+  if (input.dive && s.crashTime <= 0 && s.maneuverCooldown <= 0 && !s.diving && !s.vault) {
+    const target = diveTarget(s, direction, course),
+      wasGrounded = s.grounded || s.coyote > 0;
+    s.drive = direction;
+    s.diveFloor = target?.floor ?? floorAt(s, course, s.p) ?? s.diveFloor;
+    let lift = wasGrounded ? M.diveLift : Math.min(s.v[1], -1.8);
+    let launchSpeed = Math.max(M.runSpeed, Math.hypot(s.v[0], s.v[2]));
+    if (target) {
+      const height = platformTop(target.p, target.i, s) - s.p[1];
+      if (wasGrounded) lift = Math.sqrt(2 * M.gravity * (Math.max(0, height) + 0.15));
+      else if (height > 0 && s.v[1] > 0) lift = s.v[1];
+      const discriminant = lift * lift - 2 * M.gravity * height;
+      if (discriminant >= 0) {
+        const flight = (lift + Math.sqrt(discriminant)) / M.gravity;
+        const aim = Math.max(
+          0.15,
+          (target.ray!.entry + target.ray!.exit) / 2 +
+            Math.min(0.35, (target.ray!.exit - target.ray!.entry) * 0.2),
+        );
+        if (flight > 0) launchSpeed = Math.min(launchSpeed, aim / flight);
+      }
+    }
+    s.v[0] = direction[0] * launchSpeed;
+    s.v[2] = direction[1] * launchSpeed;
+    s.v[1] = lift;
+    s.driveSpeed = launchSpeed;
+    s.diving = true;
+    s.diveObstacle = target?.i ?? null;
+    s.grounded = false;
+    s.coyote = 0;
+    s.jumpBuffer = 0;
+    s.wallRunning = false;
+    s.wallCooldown = 0.25;
+    s.airJumped = true;
+    s.trickActive = false;
+    s.trickUsed = true;
+    s.rolling = 0;
+    s.rollUnderBeam = false;
+    s.momentum = 0;
+    s.maneuverCooldown = 0.5;
+    s.message = target ? 'BEAM DIVE' : 'DIVE';
+  }
   if (s.vault) {
     const v = s.vault;
     v.time = Math.min(v.duration, v.time + dt);
@@ -401,7 +524,9 @@ export function stepRunner(
       s.v[2] = s.drive[1] * M.vaultSpeed;
       s.driveSpeed = M.vaultSpeed;
       s.momentum = 0.35;
-      s.boost = 0.8;
+      s.boost = Math.max(s.boost, M.vaultBoostDuration);
+      s.recovery = 0;
+      startRoll(s, direction, course);
       s.message = 'VAULT BOOST';
     }
     advanceCourse(s, course);
@@ -418,51 +543,16 @@ export function stepRunner(
       s.message = TRICK_NAMES[s.trick];
     }
   }
-  if (input.roll && s.grounded && s.crashTime <= 0 && s.maneuverCooldown <= 0) {
-    s.rolling = M.rollDuration;
-    s.maneuverCooldown = 0.72;
-    s.rollUnderBeam = !!rollCanClearBeam(s, direction, course);
-    s.drive = direction;
-    s.driveSpeed = Math.hypot(s.v[0], s.v[2]);
-    s.momentum = s.rollUnderBeam ? M.rollDuration : 0;
-    if (!s.rollUnderBeam && s.driveSpeed > M.walkSpeed) {
-      s.v[0] *= M.walkSpeed / s.driveSpeed;
-      s.v[2] *= M.walkSpeed / s.driveSpeed;
-    }
-    s.message = s.rollUnderBeam ? 'BEAM ROLL · KEEP YOUR SPEED' : 'ROLL · SPRINT PAUSED';
-  }
+  startRoll(s, direction, course);
   if (s.jumpBuffer > 0 && (s.coyote > 0 || s.wallRunning)) {
-    const target =
-      s.grounded && s.crashTime <= 0 && s.maneuverCooldown <= 0
-        ? diveTarget(s, direction, course)
-        : undefined;
-    if (target) {
-      const h = platformTop(target.p, target.i, s) - s.p[1];
-      const lift = Math.sqrt(2 * M.gravity * (h + 0.15));
-      const flight = (lift + Math.sqrt(lift * lift - 2 * M.gravity * h)) / M.gravity;
-      const aim =
-        (target.ray!.entry + target.ray!.exit) / 2 +
-        Math.min(0.35, (target.ray!.exit - target.ray!.entry) * 0.2);
-      s.drive = direction;
-      s.driveSpeed = aim / flight;
-      s.v[0] = direction[0] * s.driveSpeed;
-      s.v[2] = direction[1] * s.driveSpeed;
-      s.v[1] = lift;
-      s.diving = true;
-      s.diveObstacle = target.i;
-      s.diveFloor = s.p[1];
-      s.maneuverCooldown = 0.5;
-      s.message = 'BEAM DIVE';
-    } else {
-      s.v[1] = s.wallRunning ? 11.4 : M.jumpSpeed;
-      if (s.wallRunning && wall) {
-        s.v[wall.axis] = wall.side * 6.5;
-        s.wallCooldown = 0.3;
-        s.message = 'WALL JUMP';
-      }
-      s.diving = false;
-      s.diveObstacle = null;
+    s.v[1] = s.wallRunning ? 11.4 : M.jumpSpeed;
+    if (s.wallRunning && wall) {
+      s.v[wall.axis] = wall.side * 6.5;
+      s.wallCooldown = 0.3;
+      s.message = 'WALL JUMP';
     }
+    s.diving = false;
+    s.diveObstacle = null;
     s.grounded = false;
     s.coyote = 0;
     s.jumpBuffer = 0;
@@ -511,7 +601,18 @@ export function stepRunner(
   s.v[2] += (targetZ - s.v[2]) * Math.min(1, dt * acceleration);
   const previous = [...s.p],
     next = s.p.map((n, i) => n + s.v[i] * dt) as Vec3;
-  const height = s.diving || s.rolling > 0 || s.crashTime > 0 ? 0.8 : 1.8;
+  const landingFloor = floorAt(s, course, next);
+  s.rollReady =
+    s.rollBuffer > 0 &&
+    !s.grounded &&
+    !s.diving &&
+    !s.wallRunning &&
+    s.crashTime <= 0 &&
+    s.v[1] <= 0 &&
+    landingFloor !== undefined &&
+    s.p[1] - landingFloor >= -0.12 &&
+    s.p[1] - landingFloor <= M.rollPrepHeight;
+  const height = s.diving || s.rolling > 0 || s.rollReady || s.crashTime > 0 ? 0.8 : 1.8;
   let grounded = false,
     landedOn = -1;
   for (let i = 0; i < course.platforms.length; i++) {
@@ -562,21 +663,15 @@ export function stepRunner(
       const eligible =
         beam?.kind === 'obstacle' &&
         platformTop(beam, landedOn, s) - beam.size[1] <= s.diveFloor + 0.25;
-      const pastMiddle =
-        eligible && (s.p[0] - beam.p[0]) * s.drive[0] + (s.p[2] - beam.p[2]) * s.drive[1] >= -0.01;
-      const pull = pastMiddle ? pullOverBeam(s, course, landedOn) : null;
+      const farEnough = eligible && beamProgress(s.p, s.drive, beam) >= 0.25 - 1e-6;
+      const pull = farEnough ? pullOverBeam(s, course, landedOn) : null;
       if (pull) {
-        s.vault = pull;
-        s.diving = false;
-        s.diveObstacle = null;
-        s.grounded = false;
-        s.trickActive = false;
-        s.message = 'HAND PULL · BEAM CLEARED';
+        startPull(s, pull);
         pose(s, 'vault', dt);
         advanceCourse(s, course);
         return;
       }
-      crash(s, eligible ? 'SHORT VAULT · BEFORE BEAM MIDPOINT' : 'DIVE CRASH · MOMENTUM LOST');
+      crash(s, eligible ? 'SHORT VAULT · BEFORE FIRST QUARTER' : 'DIVE CRASH · MOMENTUM LOST');
     } else if (s.trickActive) {
       if (s.trickTime + 1e-6 >= M.trickDuration) {
         s.boost = 1.15;
@@ -593,6 +688,7 @@ export function stepRunner(
     s.trickUsed = false;
     s.airJumped = false;
   }
+  startRoll(s, direction, course);
   pose(
     s,
     s.grounded
@@ -607,11 +703,13 @@ export function stepRunner(
         ? 'wallrun'
         : s.diving
           ? 'dive'
-          : s.trickActive
-            ? s.trick
-            : s.v[1] > 0
-              ? 'jump'
-              : 'fall',
+          : s.rollReady
+            ? 'roll-ready'
+            : s.trickActive
+              ? s.trick
+              : s.v[1] > 0
+                ? 'jump'
+                : 'fall',
     dt,
   );
   advanceCourse(s, course);

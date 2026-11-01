@@ -6,7 +6,15 @@ export interface GuideResult {
   frames: GhostFrame[];
   wallSections: Set<number>;
 }
-const idle: Input = { forward: 0, right: 0, jump: false, roll: false, ability: false, yaw: 0 };
+const idle: Input = {
+  forward: 0,
+  right: 0,
+  jump: false,
+  dive: false,
+  roll: false,
+  ability: false,
+  yaw: 0,
+};
 /** Practice opponent: chooses ordinary controls, with no position or velocity corrections. */
 export function simulateGuide(course: Course): GuideResult {
   const s = createRunner(course),

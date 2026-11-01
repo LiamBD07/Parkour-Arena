@@ -13,7 +13,15 @@ import { MOVEMENT as M } from '../shared/movement.js';
 import { simulateGuide } from '../shared/guide.js';
 import { botReplay, interpolateReplay } from '../shared/replay.js';
 import { validateReplay } from '../server/app.js';
-const idle: Input = { forward: 0, right: 0, jump: false, roll: false, ability: false, yaw: 0 };
+const idle: Input = {
+  forward: 0,
+  right: 0,
+  jump: false,
+  dive: false,
+  roll: false,
+  ability: false,
+  yaw: 0,
+};
 test('skill estimates and bot pace follow solo performance with bounded ratings', () => {
   assert.ok(ratingForRun(16000, 24500) > ratingForRun(32000, 24500));
   assert.equal(ratingForRun(1000, 24500), 1800);
