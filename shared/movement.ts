@@ -9,28 +9,38 @@ export const POSES = [
   'roll',
   'vault',
   'flip',
+  'sideflip',
+  'spin',
+  'corkscrew',
   'wallrun',
 ] as const;
 export type MovementPose = (typeof POSES)[number];
+export const TRICKS = ['flip', 'sideflip', 'spin', 'corkscrew'] as const;
+export type TrickPose = (typeof TRICKS)[number];
+export function isTrick(pose: string): pose is TrickPose {
+  return (TRICKS as readonly string[]).includes(pose);
+}
+export const TRICK_NAMES: Record<TrickPose, string> = {
+  flip: 'FRONT FLIP',
+  sideflip: 'SIDE FLIP',
+  spin: 'AIR SPIN',
+  corkscrew: 'CORKSCREW',
+};
 export const MOVEMENT = {
   step: 1 / 120,
   gravity: 24,
   jumpSpeed: 10.4,
   jumpBuffer: 0.2,
   coyote: 0.16,
-  runSpeed: 8.8,
-  sprintSpeed: 11.8,
+  runSpeed: 11.8,
   walkSpeed: 3.8,
   wallSpeed: 16,
   wallDuration: 1.8,
   wallDescent: 0.65,
-  diveSpeed: 18,
-  diveLift: 7.8,
+  vaultSpeed: 18,
+  vaultReach: 3.5,
   crashDuration: 0.85,
   crashSpeed: 2.4,
   rollDuration: 0.66,
-  flipDuration: 0.5,
-  flipMinDuration: 0.26,
-  flipLandingMargin: 0.06,
-  flipBuffer: 0.2,
+  trickDuration: 0.46,
 } as const;

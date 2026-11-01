@@ -144,6 +144,39 @@ test('concurrent duplicate purchases only charge once', async () => {
   assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
   assert.equal((await request('/me')).data.player.credits, 800);
 });
+test('old course records are retained but hidden from current leaderboards and ghosts', async () => {
+  await db.query(
+    'INSERT INTO runs (id,player_id,map_id,class_id,time_ms,replay,course_version) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+    [
+      'legacy-layout-record',
+      player.id,
+      'skyline',
+      'runner',
+      8000,
+      JSON.stringify(botReplay(COURSES[0], 32000)),
+      1,
+    ],
+  );
+  assert.equal((await request('/leaderboard?map=skyline')).data.entries.length, 0);
+  assert.equal((await request('/ghosts/legacy-layout-record')).status, 409);
+  const retained = await db.query('SELECT id FROM runs WHERE id=$1', ['legacy-layout-record']);
+  assert.equal(retained.rows.length, 1);
+});
+test('tickets from an earlier layout cannot submit a run to the new course', async () => {
+  const ticket = (await request('/runs/start', { mapId: 'skyline', classId: 'runner' })).data
+    .ticket;
+  await db.query('UPDATE run_tickets SET started_at=$1,course_version=1 WHERE id=$2', [
+    Date.now() - 32500,
+    ticket,
+  ]);
+  const response = await request('/runs/finish', {
+    ticket,
+    time: 32000,
+    frames: botReplay(COURSES[0], 32000),
+  });
+  assert.equal(response.status, 409);
+  assert.match(response.data.error, /course changed/i);
+});
 test('validated solo run saves a public ghost, earns credits and cannot be submitted twice', async () => {
   const start = await request('/runs/start', { mapId: 'skyline', classId: 'runner' });
   const ticket = start.data.ticket;
@@ -239,6 +272,7 @@ test(
                 ws.send(
                   JSON.stringify({
                     type: 'join',
+                    courseVersion: COURSES[0].version,
                     map: 'harbor',
                     classId: 'runner',
                     region: 'Europe',

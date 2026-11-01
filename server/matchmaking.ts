@@ -6,6 +6,7 @@ import { sessionPlayer } from './auth.js';
 import { getPlayer } from './app.js';
 import { z } from 'zod';
 import { POSES } from '../shared/movement.js';
+import { COURSES } from '../shared/game.js';
 import { managedAuthEnabled, managedPlayer } from './neon-auth.js';
 
 interface Member {
@@ -36,13 +37,14 @@ const joinSchema = z.object({
   classId: z.enum(['runner', 'traceur', 'acrobat']),
   region: z.string().max(60),
   token: z.string().max(12000).optional(),
+  courseVersion: z.number().int().optional(),
 });
 const stateSchema = z.object({
   type: z.literal('state'),
   p: z.tuple([
     z.number().min(-70).max(70),
     z.number().min(-20).max(45),
-    z.number().min(-20).max(180),
+    z.number().min(-20).max(240),
   ]),
   yaw: z.number().min(-100).max(100),
   pose: z.enum(POSES),
@@ -155,6 +157,13 @@ export function attachMatchmaking(server: Server, db: Database) {
           if (joining || client.queuedAt) return;
           joining = true;
           const join = joinSchema.parse(raw);
+          if (join.courseVersion !== COURSES.find((c) => c.id === join.map)!.version) {
+            send(ws, {
+              type: 'error',
+              error: 'The arena has updated. Refresh the game before joining.',
+            });
+            return;
+          }
           if (managedAuthEnabled() && join.token) {
             const p = await getPlayer(db, await managedPlayer(db, join.token));
             client.name = p.username;

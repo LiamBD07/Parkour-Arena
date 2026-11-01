@@ -227,19 +227,12 @@ export function ControlsDialog({ onClose, settings }: { onClose: () => void; set
       'Move · arrow keys also work unless rebound',
     ],
     ['MOUSE', 'Look · click the course to capture cursor'],
-    [
-      settings.alwaysSprint ? 'AUTO' : keyLabel(b.sprint),
-      settings.alwaysSprint ? 'Always sprint · no modifier needed' : 'Hold to sprint',
-    ],
-    [keyLabel(b.jump), 'Jump / push away from a wall'],
-    [keyLabel(b.slide), 'Hold to crouch · slow movement'],
-    ['AUTO', `Wall run · touch a grip wall in the air; ${keyLabel(b.jump)} pushes away`],
-    [keyLabel(b.dive), 'Pull vault over a low obstacle · a floor landing crashes and loses speed'],
-    [
-      keyLabel(b.roll),
-      'Tap once to roll · keep entry speed under a raised beam, walk speed in the open',
-    ],
-    [keyLabel(b.flip), 'Tap during a jump · rotation adjusts to the landing height'],
+    ['AUTO', 'Full-speed running · no modifier needed'],
+    [keyLabel(b.jump), 'Jump · beside a low beam, dive over it'],
+    [keyLabel(b.jump) + ' AGAIN', 'Tap again in midair for a random trick'],
+    ['AUTO', `Wall run · jump onto a grip wall; ${keyLabel(b.jump)} pushes away`],
+    [keyLabel(b.roll), 'Tap once to roll under a raised beam · timing preserves speed'],
+    [keyLabel(b.restart), 'Restart the run'],
     [keyLabel(b.ability), 'Class ability'],
     [keyLabel(b.pause) + ' / ESC', 'Pause · change bindings from the pause menu'],
   ];
@@ -257,12 +250,12 @@ export function ControlsDialog({ onClose, settings }: { onClose: () => void; set
         ))}
       </div>
       <div className="tip-box">
-        <span>PRO TIP</span>Roll just before an elevated beam to keep your running speed through the
-        opening. An open-ground roll pauses sprint until you stand up. Dive onto a low obstacle to
-        plant your hands and pull across for a boost; diving onto the floor costs momentum while you
-        get up. A complete flip boosts your landing, including on an obstacle. Flips fit the
-        remaining airtime, but starting just before contact still carries a brief recovery penalty.
-        Wall running is automatic and slowly loses height.
+        <span>PRO TIP</span>Use the amber walls to cross the wide building gaps. Space jumps, dives
+        over nearby low obstacles, or kicks away from a wall. Tap it again during an ordinary jump
+        for a random trick. Every trick takes the same time; starting late costs landing speed. Roll
+        under elevated beams with a well-timed tap. A low-beam dive that lands beyond its midpoint
+        plants the hands and pulls you across for a boost; a short landing or floor impact loses
+        momentum.
       </div>
       <p className="fine-print">
         On touch screens, use the left stick to move, drag the right side to look, and tap the
@@ -379,22 +372,6 @@ export function SettingsDialog({
           <option value="high">High</option>
           <option value="low">Performance</option>
         </select>
-      </div>
-      <div className="setting-row">
-        <FootprintsIcon />
-        <div>
-          <strong>Always sprint</strong>
-          <p>Run at full speed without holding Shift</p>
-        </div>
-        <button
-          role="switch"
-          aria-checked={settings.alwaysSprint}
-          aria-label="Always sprint"
-          className={`toggle ${settings.alwaysSprint ? 'on' : ''}`}
-          onClick={() => onChange({ ...settings, alwaysSprint: !settings.alwaysSprint })}
-        >
-          <span />
-        </button>
       </div>
       <div className="bindings-heading">
         <div>
@@ -520,13 +497,5 @@ export function CurrencyDialog({
         payment confirmation.
       </p>
     </Modal>
-  );
-}
-
-function FootprintsIcon() {
-  return (
-    <span aria-hidden="true" style={{ color: 'var(--lime)', fontSize: 22 }}>
-      ↗
-    </span>
   );
 }

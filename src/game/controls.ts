@@ -3,13 +3,10 @@ export const ACTIONS = [
   ['back', 'Move backward'],
   ['left', 'Move left'],
   ['right', 'Move right'],
-  ['jump', 'Jump / wall jump'],
-  ['dive', 'Dive / pull vault'],
-  ['slide', 'Crouch (hold)'],
+  ['jump', 'Jump / vault / midair trick'],
   ['roll', 'Ground roll'],
   ['ability', 'Class ability'],
-  ['flip', 'Air flip'],
-  ['sprint', 'Sprint'],
+  ['restart', 'Restart run'],
   ['pause', 'Pause'],
 ] as const;
 export type Action = (typeof ACTIONS)[number][0];
@@ -20,12 +17,9 @@ export const DEFAULT_BINDINGS: Bindings = {
   left: 'KeyA',
   right: 'KeyD',
   jump: 'Space',
-  dive: 'KeyE',
-  slide: 'KeyC',
-  roll: 'KeyR',
+  roll: 'ShiftLeft',
   ability: 'KeyQ',
-  flip: 'KeyF',
-  sprint: 'ShiftLeft',
+  restart: 'KeyR',
   pause: 'KeyP',
 };
 const aliases: Partial<Record<Action, string[]>> = {
@@ -33,7 +27,6 @@ const aliases: Partial<Record<Action, string[]>> = {
   back: ['ArrowDown'],
   left: ['ArrowLeft'],
   right: ['ArrowRight'],
-  sprint: ['ShiftRight'],
 };
 export function validBinding(code: string) {
   return /^(Key[A-Z]|Digit[0-9]|Arrow(?:Up|Down|Left|Right)|Space|Shift(?:Left|Right)|Control(?:Left|Right)|Alt(?:Left|Right)|Mouse[0-4]|Enter|Backspace|Backquote|Minus|Equal|BracketLeft|BracketRight|Backslash|Semicolon|Quote|Comma|Period|Slash)$/.test(
@@ -44,6 +37,15 @@ export function normalizeBindings(value?: Partial<Bindings>): Bindings {
   let bindings = { ...DEFAULT_BINDINGS };
   for (const [action] of ACTIONS)
     if (value?.[action] && validBinding(value[action]!))
+      bindings = rebind(bindings, action, value[action]!);
+  return bindings;
+}
+/** Preserve custom controls while migrating the old R-roll / Shift-sprint defaults. */
+export function migrateBindings(value: Partial<Bindings> = {}): Bindings {
+  const previous: Partial<Bindings> = { ...DEFAULT_BINDINGS, roll: 'KeyR' };
+  let bindings = { ...DEFAULT_BINDINGS };
+  for (const [action] of ACTIONS)
+    if (action !== 'restart' && value[action] && value[action] !== previous[action])
       bindings = rebind(bindings, action, value[action]!);
   return bindings;
 }
@@ -82,14 +84,13 @@ export function keyLabel(code: string) {
 export class RunnerControls {
   private held = new Set<string>();
   private pending = new Map<Action, number>();
-  private touchHeld = new Set<Action>();
   private axis = { forward: 0, right: 0 };
-  constructor(
-    public bindings: Bindings = { ...DEFAULT_BINDINGS },
-    public alwaysSprint = true,
-  ) {}
+  constructor(public bindings: Bindings = { ...DEFAULT_BINDINGS }) {}
   actionFor(code: string): Action | undefined {
-    return ACTIONS.find(([action]) => this.bindings[action] === code)?.[0];
+    return (
+      ACTIONS.find(([action]) => this.bindings[action] === code)?.[0] ||
+      (code === 'ShiftRight' && this.bindings.roll === 'ShiftLeft' ? 'roll' : undefined)
+    );
   }
   down(code: string, now: number, repeat = false) {
     const action = this.actionFor(code);
@@ -103,22 +104,16 @@ export class RunnerControls {
   press(action: Action, now: number) {
     this.pending.set(action, now);
   }
-  hold(action: Action, down: boolean) {
-    if (down) this.touchHeld.add(action);
-    else this.touchHeld.delete(action);
-  }
   move(forward: number, right: number) {
     this.axis = { forward, right };
   }
   clear() {
     this.held.clear();
     this.pending.clear();
-    this.touchHeld.clear();
     this.axis = { forward: 0, right: 0 };
   }
   private isHeld(action: Action) {
     return (
-      this.touchHeld.has(action) ||
       this.held.has(this.bindings[action]) ||
       (aliases[action] || []).some(
         (code) => !Object.values(this.bindings).includes(code) && this.held.has(code),
@@ -136,12 +131,8 @@ export class RunnerControls {
     return {
       forward: Number(this.isHeld('forward')) - Number(this.isHeld('back')) + this.axis.forward,
       right: Number(this.isHeld('right')) - Number(this.isHeld('left')) + this.axis.right,
-      sprint: this.alwaysSprint || this.isHeld('sprint') || this.axis.forward > 0.7,
-      crouch: this.isHeld('slide'),
       jump: edge('jump'),
-      dive: edge('dive'),
       roll: edge('roll'),
-      flip: edge('flip'),
       ability: edge('ability'),
       yaw,
     };

@@ -46,7 +46,7 @@ const frameSchema = z.object({
   p: z.tuple([
     z.number().min(-70).max(70),
     z.number().min(-20).max(45),
-    z.number().min(-20).max(180),
+    z.number().min(-20).max(240),
   ]),
   yaw: z.number().min(-100).max(100),
   pose: z.enum(POSES),
@@ -396,26 +396,37 @@ export function createApplication(db: Database, options: { limits?: boolean } = 
       `SELECT id,username,time_ms AS time,class_id AS "classId",equipped AS skin,created_at AS "createdAt" FROM (
       SELECT r.id,p.username,r.time_ms,r.class_id,p.equipped,r.created_at,
       ROW_NUMBER() OVER (PARTITION BY r.player_id ORDER BY r.time_ms ASC,r.created_at ASC) AS place
-      FROM runs r JOIN players p ON p.id=r.player_id WHERE map_id=$1 ${classId ? 'AND class_id=$2' : ''}
+      FROM runs r JOIN players p ON p.id=r.player_id WHERE map_id=$1 AND course_version=$2 ${classId ? 'AND class_id=$3' : ''}
     ) ranked WHERE place=1 ORDER BY time_ms ASC,created_at ASC LIMIT 50`,
-      classId ? [map, classId] : [map],
+      classId
+        ? [map, COURSES.find((c) => c.id === map)!.version, classId]
+        : [map, COURSES.find((c) => c.id === map)!.version],
     );
     res.json({ entries: rows });
   });
   app.get('/api/ghosts/:id', async (req, res) => {
     const { rows } = await db.query(
-      'SELECT r.id,r.map_id AS "mapId",r.class_id AS "classId",r.time_ms AS time,r.replay,p.username,p.equipped AS skin FROM runs r JOIN players p ON p.id=r.player_id WHERE r.id=$1',
+      'SELECT r.id,r.map_id AS "mapId",r.course_version AS "courseVersion",r.class_id AS "classId",r.time_ms AS time,r.replay,p.username,p.equipped AS skin FROM runs r JOIN players p ON p.id=r.player_id WHERE r.id=$1',
       [req.params.id],
     );
     if (!rows[0]) throw new HttpError(404, 'This ghost is no longer available.');
+    if (rows[0].courseVersion !== COURSES.find((c) => c.id === rows[0].mapId)?.version)
+      throw new HttpError(409, 'This ghost uses an earlier course layout. Choose a current run.');
     res.json(rows[0]);
   });
   app.post('/api/runs/start', requirePlayer, async (req, res) => {
     const input = z.object({ mapId: mapSchema, classId: classSchema }).parse(req.body);
     const id = randomUUID();
     await db.query(
-      'INSERT INTO run_tickets (id,player_id,map_id,class_id,started_at) VALUES ($1,$2,$3,$4,$5)',
-      [id, res.locals.playerId, input.mapId, input.classId, Date.now()],
+      'INSERT INTO run_tickets (id,player_id,map_id,class_id,started_at,course_version) VALUES ($1,$2,$3,$4,$5,$6)',
+      [
+        id,
+        res.locals.playerId,
+        input.mapId,
+        input.classId,
+        Date.now(),
+        COURSES.find((c) => c.id === input.mapId)!.version,
+      ],
     );
     res.json({ ticket: id });
   });
@@ -431,10 +442,16 @@ export function createApplication(db: Database, options: { limits?: boolean } = 
     const result = await db.transaction(async (q) => {
       // Serialize this player's finishes so simultaneous tickets cannot bypass the daily reward cap.
       await q('SELECT id FROM players WHERE id=$1 FOR UPDATE', [res.locals.playerId]);
-      const r = await q<{ map_id: string; class_id: string; started_at: string; used: boolean }>(
-        'SELECT * FROM run_tickets WHERE id=$1 AND player_id=$2 FOR UPDATE',
-        [input.ticket, res.locals.playerId],
-      );
+      const r = await q<{
+        map_id: string;
+        class_id: string;
+        started_at: string;
+        used: boolean;
+        course_version: number;
+      }>('SELECT * FROM run_tickets WHERE id=$1 AND player_id=$2 FOR UPDATE', [
+        input.ticket,
+        res.locals.playerId,
+      ]);
       const ticket = r.rows[0];
       if (!ticket || ticket.used)
         throw new HttpError(400, 'This run has already been saved or has expired.');
@@ -442,14 +459,16 @@ export function createApplication(db: Database, options: { limits?: boolean } = 
       if (elapsed < input.time - 500 || elapsed > 900000)
         throw new HttpError(400, 'Run timer validation failed. Restart the course.');
       const course = COURSES.find((c) => c.id === ticket.map_id)!;
+      if (ticket.course_version !== course.version)
+        throw new HttpError(409, 'The course changed. Refresh and start a new run.');
       const problem = validateReplay(input.frames, input.time, course);
       if (problem) throw new HttpError(400, problem);
       const previous = await q<{ best: number | null }>(
-        'SELECT MIN(time_ms) AS best FROM runs WHERE player_id=$1 AND map_id=$2',
-        [res.locals.playerId, ticket.map_id],
+        'SELECT MIN(time_ms) AS best FROM runs WHERE player_id=$1 AND map_id=$2 AND course_version=$3',
+        [res.locals.playerId, ticket.map_id, course.version],
       );
       await q(
-        'INSERT INTO runs (id,player_id,map_id,class_id,time_ms,replay) VALUES ($1,$2,$3,$4,$5,$6)',
+        'INSERT INTO runs (id,player_id,map_id,class_id,time_ms,replay,course_version) VALUES ($1,$2,$3,$4,$5,$6,$7)',
         [
           runId,
           res.locals.playerId,
@@ -457,6 +476,7 @@ export function createApplication(db: Database, options: { limits?: boolean } = 
           ticket.class_id,
           input.time,
           JSON.stringify(input.frames),
+          course.version,
         ],
       );
       await q('UPDATE run_tickets SET used=TRUE WHERE id=$1', [input.ticket]);

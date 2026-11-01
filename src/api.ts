@@ -1,6 +1,11 @@
 import type { Player } from '../shared/game';
 import { getManagedAccessToken, getManagedAuthClient } from './auth-client';
-import { DEFAULT_BINDINGS, normalizeBindings, type Bindings } from './game/controls';
+import {
+  DEFAULT_BINDINGS,
+  normalizeBindings,
+  migrateBindings,
+  type Bindings,
+} from './game/controls';
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -48,19 +53,28 @@ export interface Settings {
   sound: boolean;
   sensitivity: number;
   quality: 'high' | 'low';
-  alwaysSprint: boolean;
+  controlsVersion: number;
   bindings: Bindings;
 }
 export const defaultSettings: Settings = {
   sound: false,
   sensitivity: 1,
   quality: 'high',
-  alwaysSprint: true,
+  controlsVersion: 2,
   bindings: { ...DEFAULT_BINDINGS },
 };
 export function loadSettings(): Settings {
   const saved = readLocal<Partial<Settings>>('pa-settings', {});
-  return { ...defaultSettings, ...saved, bindings: normalizeBindings(saved.bindings) };
+  return {
+    sound: saved?.sound ?? defaultSettings.sound,
+    sensitivity: saved?.sensitivity ?? 1,
+    quality: saved?.quality ?? 'high',
+    controlsVersion: 2,
+    bindings:
+      saved?.controlsVersion === 2
+        ? normalizeBindings(saved.bindings)
+        : migrateBindings(saved?.bindings),
+  };
 }
 export function readLocal<T>(key: string, fallback: T): T {
   try {

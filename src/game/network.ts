@@ -1,4 +1,4 @@
-import type { PeerState } from '../../shared/game';
+import { COURSES, type PeerState } from '../../shared/game';
 import { POSES } from '../../shared/movement';
 export interface Member {
   id: string;
@@ -49,6 +49,7 @@ export class ArenaNetwork {
           this.send({
             type: 'join',
             map,
+            courseVersion: COURSES.find((c) => c.id === map)!.version,
             classId,
             region: Intl.DateTimeFormat().resolvedOptions().timeZone.split('/')[0] || 'unknown',
             token: this.token,
@@ -93,7 +94,7 @@ export class ArenaNetwork {
       state.p[1] < -20 ||
       state.p[1] > 45 ||
       state.p[2] < -20 ||
-      state.p[2] > 180 ||
+      state.p[2] > 240 ||
       !Number.isFinite(state.yaw) ||
       Math.abs(state.yaw) > 100 ||
       !Number.isFinite(state.progress) ||

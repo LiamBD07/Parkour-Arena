@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
   COURSES,
+  courseProgress,
   ITEMS,
   type ClassId,
   type Course,
@@ -45,11 +46,11 @@ export interface EngineOptions {
   sensitivity?: number;
   quality?: 'high' | 'low';
   bindings?: Bindings;
-  alwaysSprint?: boolean;
   onHud?: (hud: HudState) => void;
   onFinish?: (time: number, frames: GhostFrame[], falls: number) => void;
   onState?: (state: Omit<PeerState, 'id'>) => void;
   onPause?: () => void;
+  onRestart?: () => void;
 }
 export class ArenaEngine {
   renderer: THREE.WebGLRenderer;
@@ -93,7 +94,7 @@ export class ArenaEngine {
     private container: HTMLElement,
     private options: EngineOptions,
   ) {
-    this.controls = new RunnerControls(options.bindings, options.alwaysSprint ?? true);
+    this.controls = new RunnerControls(options.bindings);
     this.course = options.course || COURSES[0];
     this.runner = createRunner(this.course);
     this.frames = [{ t: 0, p: [...this.course.start], yaw: 0, pose: 'idle' }];
@@ -151,6 +152,10 @@ export class ArenaEngine {
     this.renderer.domElement.addEventListener('contextmenu', this.onContextMenu);
     this.began =
       performance.now() + Math.max(500, (options.startsAt || Date.now() + 3000) - Date.now());
+    if (options.mode === 'race' && this.course.wallSections.length) {
+      this.message = 'FOLLOW THE ARROWS · JUMP ONTO THE AMBER WALL';
+      this.messageUntil = performance.now() + 7000;
+    }
     this.loop();
   }
   private material(color: string, roughness = 0.8, metalness = 0.15) {
@@ -327,12 +332,30 @@ export class ArenaEngine {
             group,
           );
         }
-        // Direction chevrons painted on the route.
-        for (let k = 0; k < 3; k++) {
-          const mark = this.box([1.2, 0.012, 0.13], [-0.4, top + 0.11, k * 1.2 - 1.2], edge, group);
-          mark.rotation.y = -0.55;
-          const mark2 = this.box([1.2, 0.012, 0.13], [0.4, top + 0.11, k * 1.2 - 1.2], edge, group);
-          mark2.rotation.y = 0.55;
+        // Route arrows lead onto the grip walls before the wide crossings.
+        const section = this.course.wallSections.find((s) => s.from === index);
+        let points: { x: number; z: number; yaw: number }[] = [];
+        if (section) {
+          const wall = this.course.platforms[section.wall];
+          const lane =
+            wall.p[0] + Math.sign(p.p[0] - wall.p[0]) * (wall.size[0] / 2 + 0.34) - p.p[0];
+          const startX = index === 0 ? 0 : -4,
+            startZ = index === 0 ? -4 : 4;
+          const endZ = p.size[2] / 2 - 3;
+          const yaw = Math.atan2(lane - startX, endZ - startZ);
+          points = Array.from({ length: 5 }, (_, k) => ({
+            x: startX + ((lane - startX) * k) / 4,
+            z: startZ + ((endZ - startZ) * k) / 4,
+            yaw,
+          }));
+        } else points = Array.from({ length: 3 }, (_, k) => ({ x: 0, z: k * 1.2 - 1.2, yaw: 0 }));
+        for (const point of points) {
+          const arrow = new THREE.Group();
+          arrow.position.set(point.x, top + 0.11, point.z);
+          arrow.rotation.y = point.yaw;
+          group.add(arrow);
+          this.box([1.2, 0.012, 0.13], [-0.4, 0, 0], edge, arrow).rotation.y = -0.55;
+          this.box([1.2, 0.012, 0.13], [0.4, 0, 0], edge, arrow).rotation.y = 0.55;
         }
         if (index > 0 && index % 2 === 0) {
           this.box([2.2, 1.3, 2], [p.size[0] / 2 - 1.5, top + 0.65, -5], dark, group);
@@ -385,6 +408,23 @@ export class ArenaEngine {
           this.scene.add(sign);
         }
       });
+    for (const section of this.course.wallSections) {
+      const wall = this.course.platforms[section.wall],
+        from = this.course.platforms[section.from],
+        to = this.course.platforms[section.to];
+      const lane = wall.p[0] + Math.sign(from.p[0] - wall.p[0]) * (wall.size[0] / 2 + 0.34);
+      for (const [label, z] of [
+        ['WALL RUN', from.p[2] + from.size[2] / 2 + 1],
+        ['JUMP OFF', to.p[2] - to.size[2] / 2 - 7],
+      ] as const) {
+        const sign = this.makeSign(label, this.course.accent, true);
+        const side = Math.sign(from.p[0] - wall.p[0]);
+        sign.position.set(lane + side * 1.8, wall.p[1] - wall.size[1] / 2 + 4.2, z);
+        sign.rotation.y = Math.PI;
+        sign.scale.setScalar(0.7);
+        this.scene.add(sign);
+      }
+    }
     // A suspended truss and cables give the skyline an industrial silhouette.
     for (const x of [-32, 35]) {
       this.box([1.2, 65, 1.2], [x, -9, 80], caution);
@@ -410,13 +450,15 @@ export class ArenaEngine {
       this.renderer.toneMappingExposure = 0.95;
     }
   }
-  private makeSign(text: string, color: string) {
+  private makeSign(text: string, color: string, transparent = false) {
     const canvas = document.createElement('canvas');
     canvas.width = 512;
     canvas.height = 128;
     const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = '#172126';
-    ctx.fillRect(0, 0, 512, 128);
+    if (!transparent) {
+      ctx.fillStyle = '#172126';
+      ctx.fillRect(0, 0, 512, 128);
+    }
     ctx.fillStyle = color;
     ctx.font = 'bold 62px sans-serif';
     ctx.textAlign = 'center';
@@ -425,7 +467,12 @@ export class ArenaEngine {
     tex.colorSpace = THREE.SRGBColorSpace;
     return new THREE.Mesh(
       new THREE.PlaneGeometry(5.5, 1.35),
-      new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }),
+      new THREE.MeshBasicMaterial({
+        map: tex,
+        side: THREE.DoubleSide,
+        transparent,
+        depthWrite: !transparent,
+      }),
     );
   }
   private resize() {
@@ -442,6 +489,11 @@ export class ArenaEngine {
     )
       return;
     const action = this.controls.actionFor(e.code);
+    if (action === 'restart') {
+      if (!e.repeat) this.options.onRestart?.();
+      e.preventDefault();
+      return;
+    }
     if (e.code === 'Escape' || action === 'pause') {
       if (!e.repeat) this.options.onPause?.();
       e.preventDefault();
@@ -466,6 +518,7 @@ export class ArenaEngine {
     if (!this.controls.actionFor(code)) return;
     e.preventDefault();
     if (this.controls.actionFor(code) === 'pause') this.options.onPause?.();
+    else if (this.controls.actionFor(code) === 'restart') this.options.onRestart?.();
     else this.controls.down(code, performance.now());
   };
   private onMouseUp = (e: MouseEvent) => {
@@ -504,9 +557,8 @@ export class ArenaEngine {
   setSound(enabled: boolean) {
     this.sound = enabled;
   }
-  updateControls(bindings: Bindings, alwaysSprint: boolean, sensitivity: number) {
+  updateControls(bindings: Bindings, sensitivity: number) {
     this.controls.bindings = bindings;
-    this.controls.alwaysSprint = alwaysSprint;
     this.options.sensitivity = sensitivity;
     this.controls.clear();
   }
@@ -515,9 +567,6 @@ export class ArenaEngine {
   }
   touchAction(action: Action) {
     this.controls.press(action, performance.now());
-  }
-  touchHold(action: Action, down: boolean) {
-    this.controls.hold(action, down);
   }
   touchLook(dx: number, dy: number) {
     this.yaw -= dx * 0.006;
@@ -662,7 +711,7 @@ export class ArenaEngine {
             phase: frame.phase,
             wallSide: frame.wallSide,
           });
-          const progress = Math.max(0, Math.min(1, (frame.p[2] + 5) / 156));
+          const progress = courseProgress(this.course, frame.p[2]);
           rivalHud.push({
             id,
             name: r.data.name,
@@ -675,7 +724,7 @@ export class ArenaEngine {
           });
         }
       }
-      const progress = Math.min(1, Math.max(0, (s.p[2] + 5) / 156));
+      const progress = courseProgress(this.course, s.p[2]);
       if (now - this.lastHud > 80) {
         this.options.onHud?.({
           time: this.done ? this.frames.at(-1)!.t : elapsed,

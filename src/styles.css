@@ -4089,7 +4089,7 @@ kbd {
     touch-action: none;
     border-radius: 3px;
   }
-  .touch-actions > button:nth-child(3) {
+  .touch-actions > button:nth-child(2) {
     background: #c7ef5caa;
     color: #1c3021;
   }

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import type { Pose } from '../../shared/game';
-import { MOVEMENT } from '../../shared/movement';
+import { MOVEMENT, isTrick } from '../../shared/movement';
 
 export interface AnimationState {
   phase?: number;
@@ -238,8 +238,8 @@ export function makeCharacter(color: string, ghost = false): Character {
       const duration =
         value === 'roll'
           ? MOVEMENT.rollDuration
-          : value === 'flip'
-            ? MOVEMENT.flipDuration
+          : isTrick(value)
+            ? MOVEMENT.trickDuration
             : value === 'crash'
               ? MOVEMENT.crashDuration
               : 0.6;
@@ -315,7 +315,7 @@ export function makeCharacter(color: string, ghost = false): Character {
         }
         groundRoll();
       }
-      if (value === 'roll' || value === 'flip') {
+      if (value === 'roll' || isTrick(value)) {
         const ground = value === 'roll';
         const tuck = Math.min(1, phase / 0.14, (1 - phase) / 0.14);
         hips.position.y = ground ? 0.94 - Math.max(0, tuck) * 0.37 : 1;
@@ -328,6 +328,29 @@ export function makeCharacter(color: string, ghost = false): Character {
           shoulders[i].rotation.x = -1.5 * Math.max(0, tuck);
           elbows[i].rotation.x = -1.7 * Math.max(0, tuck);
           ankles[i].rotation.x = -0.15;
+        }
+        if (value === 'sideflip') {
+          hips.rotation.x = 0;
+          hips.rotation.z = -Math.PI * 2 * phase;
+        }
+        if (value === 'spin') {
+          hips.rotation.x = Math.sin(phase * Math.PI) * 0.15;
+          hips.rotation.y = Math.PI * 2 * phase;
+          spine.rotation.x = 0.1;
+          head.rotation.x = -0.05;
+          thighs[0].rotation.x = -0.35 * Math.sin(phase * Math.PI);
+          thighs[1].rotation.x = 0.2 * Math.sin(phase * Math.PI);
+          for (let i = 0; i < 2; i++) {
+            knees[i].rotation.x = 0.35;
+            shoulders[i].rotation.x = -0.4;
+            shoulders[i].rotation.z = (i === 0 ? 1 : -1) * 0.85 * Math.sin(phase * Math.PI);
+            elbows[i].rotation.x = -0.6;
+          }
+        }
+        if (value === 'corkscrew') {
+          hips.rotation.y = Math.PI * 2 * phase;
+          hips.rotation.z = Math.sin(phase * Math.PI) * 0.35;
+          knees[1].rotation.x *= 0.6;
         }
         if (ground) groundRoll();
       }
@@ -347,7 +370,7 @@ export function makeCharacter(color: string, ghost = false): Character {
           shoulders[i].rotation.x = -1.9 * (1 - phase);
           elbows[i].rotation.x = -0.45;
         }
-        if (state.handTarget && phase >= 0.3 && phase <= 0.47) {
+        if (state.handTarget && phase >= 0.25 && phase <= 0.72) {
           for (let i = 0; i < 2; i++) {
             const target = state.handTarget.clone();
             target.x += i === 0 ? -0.18 : 0.18;

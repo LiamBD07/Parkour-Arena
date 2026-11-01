@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import {
   COURSES,
+  localRecordKey,
   CLASSES,
   ITEMS,
   botDuration,
@@ -171,7 +172,7 @@ export default function App() {
     setSettings(s);
     writeLocal('pa-settings', s);
   };
-  const record = readLocal<LocalRecord | null>(`pa-record-${course.id}`, null);
+  const record = readLocal<LocalRecord | null>(localRecordKey(course), null);
   const startSolo = async (rivals?: Rival[]) => {
     if (busy) return;
     setBusy(true);

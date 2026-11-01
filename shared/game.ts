@@ -32,6 +32,17 @@ export interface Course {
   start: Vec3;
   platforms: Platform[];
   checkpoints: Checkpoint[];
+  version: number;
+  wallSections: { from: number; to: number; wall: number }[];
+}
+export function courseProgress(course: Course, z: number) {
+  return Math.max(
+    0,
+    Math.min(1, (z - course.start[2]) / (course.checkpoints.at(-1)!.p[2] - course.start[2])),
+  );
+}
+export function localRecordKey(course: Course) {
+  return `pa-record-${course.id}-v${course.version}`;
 }
 export const CLASSES = [
   {
@@ -69,20 +80,20 @@ export const CLASSES = [
   },
 ];
 const base: Platform[] = [
-  { p: [0, 2, 0], size: [14, 4, 18] },
-  { p: [0, 2, 22], size: [13, 4, 16] },
-  { p: [-5, 3, 43], size: [13, 4, 16] },
-  { p: [2, 4, 64], size: [13, 4, 16] },
-  { p: [0, 3, 85], size: [14, 4, 16] },
-  { p: [5, 4, 106], size: [13, 4, 16], kind: 'hinge' },
-  { p: [0, 3, 127], size: [14, 4, 16] },
-  { p: [0, 3, 148], size: [16, 4, 18] },
-  { p: [-7.8, 8, 19], size: [1, 8, 22], kind: 'wall' },
-  { p: [9.5, 10, 62], size: [1, 9, 19], kind: 'wall' },
-  { p: [-1, 4.6, 25], size: [5, 1.2, 2], kind: 'obstacle' },
-  { p: [-5, 7.1, 47], size: [10, 0.7, 2.6], kind: 'obstacle' },
-  { p: [2, 6.6, 67], size: [4, 1.2, 2], kind: 'obstacle' },
-  { p: [0, 5.6, 130], size: [4, 1.2, 2], kind: 'obstacle' },
+  { p: [0, 2, 0], size: [16, 4, 10] },
+  { p: [0, 2, 31.5], size: [16, 4, 8] },
+  { p: [0, 3, 50.5], size: [22, 4, 24] },
+  { p: [2, 3, 91], size: [18, 4, 12] },
+  { p: [0, 3, 110], size: [14, 4, 16] },
+  { p: [5, 4, 131], size: [13, 4, 16], kind: 'hinge' },
+  { p: [0, 3, 152], size: [14, 4, 16] },
+  { p: [0, 3, 173], size: [16, 4, 18] },
+  { p: [-7.8, 8, 18], size: [1, 8, 30], kind: 'wall' },
+  { p: [10.8, 9.5, 76], size: [1, 9, 31], kind: 'wall' },
+  { p: [-1, 4.6, 31.5], size: [5, 1.2, 2], kind: 'obstacle' },
+  { p: [0, 7.1, 51], size: [24, 0.7, 2.6], kind: 'obstacle' },
+  { p: [2, 5.6, 92], size: [4, 1.2, 2], kind: 'obstacle' },
+  { p: [0, 5.6, 155], size: [4, 1.2, 2], kind: 'obstacle' },
 ];
 function makeCourse(
   id: MapId,
@@ -100,17 +111,22 @@ function makeCourse(
     district,
     description,
     difficulty,
-    distance: 154,
-    target: 24500,
+    distance: 183,
+    target: 34000,
+    version: 2,
+    wallSections: [
+      { from: 0, to: 1, wall: 8 },
+      { from: 2, to: 3, wall: 9 },
+    ],
     accent,
     start: [0, 4, -5],
     platforms: base.map((p) => ({ ...p, p: shift(p.p) })),
     checkpoints: [
       { p: [0, 4, -5], label: 'START' },
-      { p: shift([-5, 5, 42]), label: '01' },
-      { p: shift([0, 5, 83]), label: '02' },
-      { p: shift([0, 5, 125]), label: '03' },
-      { p: shift([0, 5, 151]), label: 'FINISH' },
+      { p: shift([0, 5, 46]), label: '01' },
+      { p: shift([2, 5, 91]), label: '02' },
+      { p: shift([0, 5, 150]), label: '03' },
+      { p: shift([0, 5, 178]), label: 'FINISH' },
     ],
   };
 }
@@ -244,7 +260,7 @@ export function ratingForRun(time: number, target: number) {
   return Math.round(Math.max(600, Math.min(1800, 1200 + (target / time - 1) * 650)));
 }
 export function botDuration(mmr: number, seed = 0) {
-  const base = 24500 / Math.max(0.35, 1 + (mmr - 1200) / 650);
+  const base = 34000 / Math.max(0.35, 1 + (mmr - 1200) / 650);
   return Math.round(Math.max(14000, Math.min(65000, base + (seed - 1) * 900)) / 100) * 100;
 }
 export function formatTime(ms: number | null): string {

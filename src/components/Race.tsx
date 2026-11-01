@@ -31,6 +31,8 @@ import { Scene, Logo, Credits } from './Primitives';
 import type { LocalRecord } from './Pages';
 import { SettingsDialog } from './Dialogs';
 import { keyLabel, type Action } from '../game/controls';
+import { localRecordKey, courseProgress } from '../../shared/game';
+import { isTrick, TRICK_NAMES } from '../../shared/movement';
 
 export interface RaceConfig {
   id: string;
@@ -115,7 +117,7 @@ export function Race({
   const finish = useCallback(
     async (time: number, frames: GhostFrame[], falls: number) => {
       resultRef.current = true;
-      const key = `pa-record-${config.course.id}`;
+      const key = localRecordKey(config.course);
       const previous = readLocal<LocalRecord | null>(key, null);
       const pb = !previous || time < previous.time;
       if (pb && !config.multiplayer)
@@ -164,10 +166,10 @@ export function Race({
       quality: settings.quality,
       sensitivity: settings.sensitivity,
       bindings: settings.bindings,
-      alwaysSprint: settings.alwaysSprint,
       onHud: setHud,
       onFinish: finish,
       onPause: pause,
+      onRestart: onRetry,
       onState: network
         ? (state: Parameters<ArenaNetwork['sendState']>[0]) => network.sendState(state)
         : undefined,
@@ -178,12 +180,8 @@ export function Race({
     engineRef.current?.setSound(sound);
   }, [sound, engineRef]);
   useEffect(() => {
-    engineRef.current?.updateControls(
-      settings.bindings,
-      settings.alwaysSprint,
-      settings.sensitivity,
-    );
-  }, [settings.bindings, settings.alwaysSprint, settings.sensitivity, engineRef]);
+    engineRef.current?.updateControls(settings.bindings, settings.sensitivity);
+  }, [settings.bindings, settings.sensitivity, engineRef]);
   const standings = [
     { id: 'you', name: player?.username || 'YOU', progress: hud.progress, finished: result?.time },
     ...hud.rivals,
@@ -230,10 +228,10 @@ export function Race({
         <span>START</span>
         <div>
           <i style={{ width: `${hud.progress * 100}%` }} />
-          {[0, 1, 2, 3, 4].map((i) => (
+          {config.course.checkpoints.map((cp, i) => (
             <span
               className={hud.checkpoint >= i ? 'passed' : ''}
-              style={{ left: `${i * 25}%` }}
+              style={{ left: `${courseProgress(config.course, cp.p[2]) * 100}%` }}
               key={i}
             />
           ))}
@@ -270,9 +268,7 @@ export function Race({
           <strong key={hud.countdown}>{hud.countdown}</strong>
           <p>
             Click the course to look around · {keyLabel(settings.bindings.forward)} to move ·{' '}
-            {settings.alwaysSprint
-              ? 'Sprint is automatic'
-              : `${keyLabel(settings.bindings.sprint)} to sprint`}
+            Running is automatic
           </p>
         </div>
       )}
@@ -304,10 +300,9 @@ export function Race({
             </div>
           </div>
           <div className="race-controls-hint">
-            <kbd>{keyLabel(settings.bindings.jump)}</kbd> JUMP{' '}
-            <kbd>{keyLabel(settings.bindings.dive)}</kbd> DIVE / VAULT{' '}
+            <kbd>{keyLabel(settings.bindings.jump)}</kbd> JUMP / VAULT · TAP AGAIN: TRICK{' '}
             <kbd>{keyLabel(settings.bindings.roll)}</kbd> ROLL{' '}
-            <kbd>{keyLabel(settings.bindings.slide)}</kbd> CROUCH <span>WALL RUN: AUTO</span>{' '}
+            <kbd>{keyLabel(settings.bindings.restart)}</kbd> RESTART <span>WALL RUN: AUTO</span>{' '}
             <kbd>{keyLabel(settings.bindings.pause)}</kbd> PAUSE
           </div>
           <div
@@ -316,21 +311,22 @@ export function Race({
             data-phase={hud.phase.toFixed(3)}
             data-grounded={String(hud.grounded)}
           >
-            {
-              {
-                idle: 'READY',
-                run: 'RUNNING',
-                jump: 'IN THE AIR',
-                fall: 'FALLING',
-                slide: 'CROUCH',
-                dive: 'FORWARD DIVE',
-                crash: 'CRASH · GETTING UP',
-                roll: 'GROUND ROLL',
-                vault: 'PULL VAULT',
-                flip: hud.phase >= 1 ? 'FLIP COMPLETE' : `FLIP · ${Math.round(hud.phase * 100)}%`,
-                wallrun: 'WALL RUN',
-              }[hud.pose]
-            }
+            {isTrick(hud.pose)
+              ? hud.phase >= 1
+                ? 'TRICK COMPLETE'
+                : TRICK_NAMES[hud.pose]
+              : {
+                  idle: 'READY',
+                  run: 'RUNNING',
+                  jump: 'IN THE AIR',
+                  fall: 'FALLING',
+                  slide: 'CROUCH',
+                  dive: 'FORWARD DIVE',
+                  crash: 'CRASH · GETTING UP',
+                  roll: 'GROUND ROLL',
+                  vault: 'PULL VAULT',
+                  wallrun: 'WALL RUN',
+                }[hud.pose]}
           </div>
         </>
       )}
@@ -387,22 +383,16 @@ export function Race({
           <div className="touch-actions">
             {[
               ['ability', 'ABILITY'],
-              ['slide', 'CROUCH'],
-              ['jump', 'JUMP'],
-              ['dive', 'DIVE'],
+              ['jump', 'JUMP / TRICK'],
               ['roll', 'ROLL'],
-              ['flip', 'FLIP'],
             ].map(([key, label]) => (
               <button
                 key={key}
                 onPointerDown={(e) => {
                   e.preventDefault();
                   e.currentTarget.setPointerCapture(e.pointerId);
-                  if (key === 'slide') engineRef.current?.touchHold('slide', true);
-                  else touchAction(key as Action);
+                  touchAction(key as Action);
                 }}
-                onPointerUp={() => engineRef.current?.touchHold(key as Action, false)}
-                onPointerCancel={() => engineRef.current?.touchHold(key as Action, false)}
               >
                 {label}
               </button>

@@ -91,6 +91,13 @@ export async function migrate(db: Database) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`);
     await q('CREATE INDEX IF NOT EXISTS runs_map_time_idx ON runs(map_id, time_ms)');
+    await q('ALTER TABLE runs ADD COLUMN IF NOT EXISTS course_version INTEGER NOT NULL DEFAULT 1');
+    await q(
+      'ALTER TABLE run_tickets ADD COLUMN IF NOT EXISTS course_version INTEGER NOT NULL DEFAULT 1',
+    );
+    await q(
+      'CREATE INDEX IF NOT EXISTS runs_version_time_idx ON runs(map_id,course_version,time_ms)',
+    );
     await q('CREATE INDEX IF NOT EXISTS sessions_expiry_idx ON sessions(expires_at)');
     await q(`CREATE TABLE IF NOT EXISTS payment_events (
       checkout_id TEXT PRIMARY KEY, player_id TEXT NOT NULL REFERENCES players(id),
