@@ -186,6 +186,75 @@ test('an airborne E dive reaches the beam, pulls, and keeps a sustained speed bo
   assert.ok(s.v[2] > M.runSpeed * 1.4);
   assert.equal(s.crashTime, 0);
 });
+for (const course of COURSES)
+  for (const index of [12, 13])
+    test(`${course.name} beam ${index}: a visible hand landing pulls across instead of crashing on the floor`, () => {
+      const beam = course.platforms[index],
+        top = beam.p[1] + beam.size[1] / 2,
+        s = createRunner(course);
+      s.p = [beam.p[0], 5, beam.p[2] - 7];
+      s.v[2] = M.runSpeed;
+      stepRunner(s, { ...idle, forward: 1, dive: true }, course, 'runner', M.step);
+      for (let i = 0; i < 160 && !s.vault && !s.crashTime; i++)
+        stepRunner(s, { ...idle, forward: 1 }, course, 'runner', M.step);
+      assert.ok(s.vault, 'hands on the beam must trigger the arm pull');
+      assert.ok(
+        s.vault.start[1] < top,
+        'the feet remain below the beam while the hands land on it',
+      );
+      assert.ok(beamProgress(s.vault.contact, s.drive, beam) >= 0.25);
+      assert.equal(s.crashTime, 0);
+      assert.equal(s.v[2], M.vaultSpeed);
+      assert.ok(s.boost > 0);
+      for (let i = 0; i < 120 && s.vault; i++)
+        stepRunner(s, { ...idle, forward: 1 }, course, 'runner', M.step);
+      assert.ok(s.grounded);
+      assert.ok(s.p[2] > beam.p[2] + beam.size[2] / 2);
+      assert.equal(s.crashTime, 0);
+      assert.equal(s.v[2], M.vaultSpeed);
+    });
+test('a dive landing on a higher roof uses the floor beneath that beam, not the takeoff roof', () => {
+  const course: Course = {
+    ...flat,
+    platforms: [
+      { p: [0, 3, -6], size: [30, 2, 8] },
+      { p: [0, 4, 10], size: [30, 2, 16] },
+      { p: [0, 5.6, 5], size: [6, 1.2, 2], kind: 'obstacle' },
+    ],
+  };
+  const s = createRunner(course);
+  s.p = [0, 9, -0.25];
+  s.v = [0, -1, M.runSpeed];
+  s.grounded = false;
+  s.coyote = 0;
+  s.diveFloor = 4;
+  stepRunner(s, { ...idle, forward: 1, dive: true }, course, 'runner', M.step);
+  assert.equal(s.diveObstacle, null, 'the beam is outside assisted-dive reach at takeoff');
+  assert.equal(s.diveFloor, 4);
+  for (let i = 0; i < 160 && !s.vault && !s.crashTime; i++)
+    stepRunner(s, { ...idle, forward: 1 }, course, 'runner', M.step);
+  assert.ok(s.vault);
+  assert.equal(s.diveFloor, 5);
+  assert.equal(s.crashTime, 0);
+  assert.equal(s.v[2], M.vaultSpeed);
+  assert.ok(s.boost > 0);
+});
+test('reaching only the front of a deep beam with the hands does not bypass the quarter cutoff', () => {
+  const course: Course = {
+    ...flat,
+    platforms: [flat.platforms[0], { p: [0, 0.6, 5], size: [6, 1.2, 4], kind: 'obstacle' }],
+  };
+  const s = createRunner(course);
+  s.p[2] = -3;
+  s.v[2] = M.runSpeed;
+  stepRunner(s, { ...idle, forward: 1, dive: true }, course, 'runner', M.step);
+  for (let i = 0; i < 160 && !s.crashTime; i++) {
+    stepRunner(s, { ...idle, forward: 1 }, course, 'runner', M.step);
+    assert.equal(s.vault, null);
+    assert.equal(s.boost, 0);
+  }
+  assert.ok(s.crashTime > 0);
+});
 test('landing between the first quarter and midpoint grants the hand pull and boost', () => {
   const s = createRunner(beamCourse);
   s.p[2] = 1.5;

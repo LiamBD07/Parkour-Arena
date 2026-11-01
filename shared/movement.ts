@@ -42,6 +42,8 @@ export const MOVEMENT = {
   vaultReach: 3.5,
   vaultBoostDuration: 0.8,
   diveLift: 7.8,
+  diveHandHeight: 0.95,
+  diveHandReach: 1,
   crashDuration: 0.85,
   crashSpeed: 2.4,
   rollDuration: 0.66,

@@ -219,6 +219,19 @@ function floorAt(s: RunnerState, course: Course, point: Vec3): number | undefine
   }
   return floor;
 }
+function lowBeamFloor(s: RunnerState, course: Course, index: number): number | undefined {
+  const beam = course.platforms[index];
+  if (beam.kind !== 'obstacle') return;
+  const floor = floorAt(s, course, beam.p),
+    top = platformTop(beam, index, s);
+  if (
+    floor !== undefined &&
+    top - beam.size[1] <= floor + 0.25 &&
+    top - floor >= 0.4 &&
+    top - floor <= 1.65
+  )
+    return floor;
+}
 /** The roof beneath the beam determines eligibility, even when the runner is airborne. */
 function diveTarget(s: RunnerState, direction: [number, number], course: Course) {
   return course.platforms
@@ -226,18 +239,10 @@ function diveTarget(s: RunnerState, direction: [number, number], course: Course)
       p,
       i,
       ray: horizontalRay(s.p, direction, p),
-      floor: floorAt(s, course, p.p),
+      floor: lowBeamFloor(s, course, i),
     }))
     .filter(
-      ({ p, i, ray, floor }) =>
-        p.kind === 'obstacle' &&
-        ray &&
-        ray.exit > 0 &&
-        ray.entry <= M.vaultReach &&
-        floor !== undefined &&
-        platformTop(p, i, s) - p.size[1] <= floor + 0.25 &&
-        platformTop(p, i, s) - floor >= 0.4 &&
-        platformTop(p, i, s) - floor <= 1.65,
+      ({ ray, floor }) => ray && ray.exit > 0 && ray.entry <= M.vaultReach && floor !== undefined,
     )
     .sort((a, b) => Math.max(0, a.ray!.entry) - Math.max(0, b.ray!.entry))[0];
 }
@@ -248,7 +253,40 @@ export function beamProgress(point: Vec3, direction: [number, number], beam: Pla
   const sign = Math.sign(direction[axis === 0 ? 0 : 1]) || 1;
   return ((point[axis] - beam.p[axis]) * sign + beam.size[axis] / 2) / beam.size[axis];
 }
-function pullOverBeam(s: RunnerState, course: Course, index: number): VaultMotion | null {
+/** A forward dive lands on its outstretched hands as well as its feet. */
+function diveHandContact(s: RunnerState, course: Course, previous: Vec3, next: Vec3) {
+  if (!s.diving || s.v[1] >= 0) return;
+  let first: { index: number; floor: number; time: number; root: Vec3; point: Vec3 } | undefined;
+  course.platforms.forEach((beam, index) => {
+    const floor = lowBeamFloor(s, course, index);
+    if (floor === undefined) return;
+    const top = platformTop(beam, index, s),
+      from = previous[1] + M.diveHandHeight,
+      to = next[1] + M.diveHandHeight;
+    if (from < top || to > top) return;
+    const time = (from - top) / (from - to),
+      root = previous.map((n, axis) => n + (next[axis] - n) * time) as Vec3,
+      point: Vec3 = [
+        root[0] + s.drive[0] * M.diveHandReach,
+        top,
+        root[2] + s.drive[1] * M.diveHandReach,
+      ];
+    if (
+      Math.abs(point[0] - beam.p[0]) <= beam.size[0] / 2 &&
+      Math.abs(point[2] - beam.p[2]) <= beam.size[2] / 2 &&
+      beamProgress(point, s.drive, beam) >= 0.25 - 1e-6 &&
+      (!first || time < first.time)
+    )
+      first = { index, floor, time, root, point };
+  });
+  return first;
+}
+function pullOverBeam(
+  s: RunnerState,
+  course: Course,
+  index: number,
+  contact: Vec3 = s.p,
+): VaultMotion | null {
   const beam = course.platforms[index],
     ray = horizontalRay(s.p, s.drive, beam);
   if (!ray) return null;
@@ -279,7 +317,7 @@ function pullOverBeam(s: RunnerState, course: Course, index: number): VaultMotio
       start: [...s.p],
       across,
       end,
-      contact: [s.p[0], top + 0.04, s.p[2]],
+      contact: [contact[0], top + 0.04, contact[2]],
       time: 0,
       duration: distance / M.vaultSpeed,
       obstacle: index,
@@ -293,7 +331,9 @@ export function sampleVault(v: VaultMotion, u: number): Vec3 {
   const distance = Math.hypot(v.end[0] - v.start[0], v.end[2] - v.start[2]);
   const lip = Math.hypot(v.across[0] - v.start[0], v.across[2] - v.start[2]) / distance;
   if (phase <= lip)
-    point[1] = v.start[1] + Math.sin(((phase / Math.max(0.01, lip)) * Math.PI) / 2) * 0.18;
+    point[1] =
+      v.start[1] +
+      Math.sin(((phase / Math.max(0.01, lip)) * Math.PI) / 2) * (v.across[1] - v.start[1]);
   else point[1] = v.across[1] + ((v.end[1] - v.across[1]) * (phase - lip)) / (1 - lip);
   return point;
 }
@@ -599,8 +639,21 @@ export function stepRunner(
   } else s.v[1] -= M.gravity * dt;
   s.v[0] += (targetX - s.v[0]) * Math.min(1, dt * acceleration);
   s.v[2] += (targetZ - s.v[2]) * Math.min(1, dt * acceleration);
-  const previous = [...s.p],
+  const previous: Vec3 = [...s.p],
     next = s.p.map((n, i) => n + s.v[i] * dt) as Vec3;
+  const handContact = diveHandContact(s, course, previous, next);
+  if (handContact) {
+    s.p = handContact.root;
+    s.diveFloor = handContact.floor;
+    const pull = pullOverBeam(s, course, handContact.index, handContact.point);
+    if (pull) {
+      startPull(s, pull);
+      pose(s, 'vault', dt);
+      advanceCourse(s, course);
+      return;
+    }
+    s.p = previous;
+  }
   const landingFloor = floorAt(s, course, next);
   s.rollReady =
     s.rollBuffer > 0 &&
@@ -660,9 +713,9 @@ export function stepRunner(
   if (justLanded) {
     if (s.diving) {
       const beam = course.platforms[landedOn];
-      const eligible =
-        beam?.kind === 'obstacle' &&
-        platformTop(beam, landedOn, s) - beam.size[1] <= s.diveFloor + 0.25;
+      const floor = lowBeamFloor(s, course, landedOn);
+      const eligible = floor !== undefined;
+      if (eligible) s.diveFloor = floor;
       const farEnough = eligible && beamProgress(s.p, s.drive, beam) >= 0.25 - 1e-6;
       const pull = farEnough ? pullOverBeam(s, course, landedOn) : null;
       if (pull) {
