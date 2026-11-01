@@ -122,6 +122,19 @@ test('Space beside a roof-supported beam dives onto its far half, plants hands, 
   assert.ok(s.v[2] > M.runSpeed);
   assert.equal(s.crashTime, 0);
 });
+test('Space alone beside a beam completes the dive and pull without holding a movement key', () => {
+  const s = createRunner(beamCourse);
+  s.p[2] = 1.5;
+  stepRunner(s, { ...idle, jump: true }, beamCourse, 'runner', M.step);
+  let pulled = false;
+  for (let i = 0; i < 120; i++) {
+    stepRunner(s, idle, beamCourse, 'runner', M.step);
+    if (s.vault) pulled = true;
+  }
+  assert.ok(pulled);
+  assert.equal(s.crashTime, 0);
+  assert.ok(s.p[2] > 7);
+});
 test('landing a beam dive before its midpoint loses momentum', () => {
   const s = createRunner(beamCourse);
   s.p[2] = 0.5;

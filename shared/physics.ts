@@ -489,8 +489,9 @@ export function stepRunner(
     acceleration = 7;
   }
   if (s.diving) {
-    targetX = s.drive[0] * s.driveSpeed + (dx - s.drive[0]) * 2.5;
-    targetZ = s.drive[1] * s.driveSpeed + (dz - s.drive[1]) * 2.5;
+    const steering = Math.hypot(dx, dz) > 0.1;
+    targetX = s.drive[0] * s.driveSpeed + (steering ? dx - s.drive[0] : 0) * 2.5;
+    targetZ = s.drive[1] * s.driveSpeed + (steering ? dz - s.drive[1] : 0) * 2.5;
   }
   if (s.wallRunning && wall) {
     const along = wall.axis === 0 ? 2 : 0,
